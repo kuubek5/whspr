@@ -6,7 +6,7 @@ Push-to-talk диктовка: тримаєш **F9** — говориш — ві
 > Розпізнавання мовлення через локальний Whisper (faster-whisper / CTranslate2)
 > на NVIDIA GPU. Нічого не йде в хмару, немає підписки, працює офлайн.
 
-📖 Повна документація — у [Wiki](../../wiki).
+📖 Повна документація — у [Wiki](docs/Home.md).
 
 ---
 
@@ -38,7 +38,7 @@ python -m venv .venv
 Далі транскрипція ~0,5–1,5 с на фразу (RTX 3070, large-v3-turbo int8).
 
 > **Pagefile має бути увімкнений.** При вимкненому — CUDA/pip падають з
-> `mkl_malloc failed` / error 1455. Див. [Troubleshooting](../../wiki/Troubleshooting).
+> `mkl_malloc failed` / error 1455. Див. [Troubleshooting](docs/Troubleshooting.md).
 
 ---
 
@@ -69,7 +69,7 @@ python -m venv .venv
   автокапіталізація речень.
 - **Автозапуск**, **один інстанс** (mutex).
 
-Детально про кожну — [Wiki › Usage](../../wiki/Usage) і [Wiki › Configuration](../../wiki/Configuration).
+Детально про кожну — [Wiki › Usage](docs/Usage.md) і [Wiki › Configuration](docs/Configuration.md).
 
 ## Файли
 
@@ -90,7 +90,7 @@ python -m venv .venv
 - **Модель:** `deepdml/faster-whisper-large-v3-turbo-ct2` — робоче CT2-дзеркало
   (оригінальне `Systran/...` репо на HF віддає 401).
 - **Вставка через фізичну VK 0x56, не символ 'v':** на кириличній розкладці
-  символ `v` не мапиться (`VkKeyScan → 0xFF`) і pyn-put Ctrl+V мовчки не спрацьовує.
+  символ `v` не мапиться (`VkKeyScan → 0xFF`) і pynput Ctrl+V мовчки не спрацьовує.
   Фізична клавіша обходить це — незалежно від розкладки.
 - **Без Silero VAD:** `import onnxruntime` на тестовій машині висить хвилинами.
   Замість — RMS-гейт тиші; push-to-talk і так гарантує мовлення в записі.
