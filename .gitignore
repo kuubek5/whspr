@@ -1,0 +1,18 @@
+# virtualenv (huge — CUDA DLLs, model runtime)
+.venv/
+__pycache__/
+*.pyc
+
+# user data — private, never commit
+config.json
+history.db
+whspr.log
+*.log
+
+# generated locally (absolute paths / machine-specific)
+whspr.lnk
+
+# scratch / test artifacts
+tts_test.wav
+uk_test_*.mp3
+ab_result.txt

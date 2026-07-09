@@ -1,0 +1,13 @@
+faster-whisper>=1.2
+sounddevice>=0.5
+pynput>=1.8
+pyperclip>=1.11
+numpy
+pystray>=0.19
+pillow
+customtkinter>=6.0
+# CUDA runtime for ctranslate2 (no system CUDA toolkit needed)
+nvidia-cublas-cu12
+# cuDNN pinned: newer 9.x builds trigger multi-minute runtime kernel
+# compilation on every process start with ctranslate2 4.8 (RTX 3070/SM86)
+nvidia-cudnn-cu12==9.1.0.70
