@@ -5,6 +5,69 @@ Galileo) та візуальних (Midjourney/чат-моделі). Копію�
 
 ---
 
+## 0. Для Claude (Artifacts) — РЕКОМЕНДОВАНО
+
+Claude генерує живий інтерактивний прототип (React + Tailwind), не картинку.
+Встав це в claude.ai:
+
+```
+Build me a high-fidelity, interactive prototype of a desktop app UI as a single
+React artifact (Tailwind, no external libs except lucide-react icons). The app is
+"whspr" — a local, privacy-first push-to-talk voice dictation tool for Windows;
+everything runs on the user's GPU, nothing touches the cloud. I want it to look
+like a flagship developer tool — the craft level of Linear, Raycast, Arc and
+Superhuman. Restrained, dark-first, spatial depth over decoration, one earned
+accent color, nothing gimmicky.
+
+Make it a realistic app shell at ~960×620 with a left sidebar (Home, History,
+Dictionary, Settings) and switchable pages — clicking nav actually changes the
+page. Include a light/dark theme toggle in the corner; polish BOTH themes.
+
+VISUAL SYSTEM
+- Dark: near-black cool-tinted background (#0E0E12), 3 layered surfaces
+  (#16161C / #1E1E26 / #262630) with 1px hairline borders at 8% white. Light
+  theme mirrors it (#FAFAFB / white cards).
+- ONE accent, warm coral #F0555C, used ONLY for the recording state and the
+  primary button. Everything else grayscale. The accent must feel earned.
+- Inter for UI, a monospace for transcripts / stat numbers / hotkey chips.
+  Tabular numbers. 8px spacing grid, 14px card radius, soft low shadows.
+- Thin lucide line icons.
+
+PAGES (use realistic Ukrainian dummy data)
+1. Home — a hero status card that can show 3 states (Idle / Recording with an
+   animated audio-waveform + running timer / Transcribing with a shimmer); add
+   little buttons to preview each state live. Below: 4 stat tiles (Слів сьогодні,
+   Диктовок, Слів усього, Слів/хв) with numbers that count up. Then a "Останні
+   диктовки" feed — timestamp + Ukrainian transcript in mono.
+2. History — cards: meta row (time · uk · duration) + transcript, hover reveals
+   copy/delete.
+3. Dictionary — a textarea of comma terms (hotwords) + a voice-commands editor
+   ("новий рядок = ⏎").
+4. Settings — grouped card rows: a "Натисніть клавіші" hotkey-capture button that
+   glows coral while listening, refined toggle switches, dropdowns (модель для
+   української: stock/uk-ft), a masked API-key field.
+
+SIGNATURE PIECE
+Also render the floating "pill" overlay separately — a small always-on-top
+capsule with 3 states (red dot + animated waveform + timer → "Розпізнаю…" shimmer
+→ green check + pasted-text preview). This is the hero moment; make it feel alive.
+
+MOTION
+Animate the waveform bars, breathe the idle status dot, pulse it coral while
+recording, count-up the stat numbers, slide the nav selection indicator, springy
+150–250ms easing. Keep it smooth and fast.
+
+Make it genuinely beautiful and production-grade, not a wireframe. Fill every
+screen with believable content. Ship it as one self-contained artifact I can
+click around.
+```
+
+После первой версии итерируй в чате: «make the pill bigger and center it»,
+«tone down the shadows», «try the accent as a softer red», «add a subtle radial
+glow behind the hero card», «show the light theme».
+
+---
+
 ## 1. Основний промт (для v0 / Lovable / Figma AI / дизайн-ШІ)
 
 ```
