@@ -47,6 +47,7 @@ DEFAULTS = {
     "hotkey": "f9",           # any key or combo, e.g. "ctrl+space", "alt+vk81"
     "lang_hotkey": "f10",     # tap to toggle uk/en
     "language": "uk",
+    "theme": "dark",          # web UI theme: dark | light
     # which model handles Ukrainian: "stock" or "uk-ft" (fine-tune, downloaded)
     "model_uk": "stock",
     "rms_threshold": 0.003,
@@ -469,6 +470,8 @@ def transcribe_and_paste(target_hwnd: int) -> None:
         history_add(text, lang, dur)
         pasted = paste_text(text, target_hwnd)
         done_msg, ok = (text, True) if pasted else ("фокус втрачено — текст у буфері", False)
+        state["pill_text"] = text
+        state["pill_done_at"] = time.time()
     finally:
         set_status("idle")
         if overlay is not None and config.get("overlay", True):
@@ -656,19 +659,66 @@ class AppContext:
 
 
 # ---------------- Main ----------------
+def _mode() -> str:
+    if "--no-ui" in sys.argv:
+        return "headless"
+    if "--classic" in sys.argv:
+        return "classic"
+    return "web"  # default: new pywebview design
+
+
+def quit_app():
+    if tray_icon is not None:
+        tray_icon.stop()
+    os._exit(0)
+
+
+def _start_core() -> None:
+    """Audio stream, model warm-up, hotkey listener — shared by all modes."""
+    def boot():
+        state["model"] = load_model()
+        set_status("idle")
+        log(f"ready. hold {hotkey_label(config['hotkey'])} = dictate "
+            f"({LANGUAGES[state['lang']]})")
+
+    threading.Thread(target=boot, daemon=True).start()
+    stream = sd.InputStream(
+        samplerate=SAMPLE_RATE, channels=1, dtype="float32",
+        blocksize=BLOCK, callback=audio_callback,
+    )
+    stream.start()
+    state["stream"] = stream
+    restart_listener()
+
+
 def main() -> None:
     global overlay
     ensure_single_instance()
-    use_ui = "--no-ui" not in sys.argv
+    mode = _mode()
 
-    def quit_app():
-        if tray_icon is not None:
-            tray_icon.stop()
-        os._exit(0)
+    if mode == "web":
+        try:
+            import webview_app
+        except ImportError as e:
+            log(f"pywebview unavailable ({e}); falling back to --classic")
+            mode = "classic"
 
-    root = None
-    app = None
-    if use_ui:
+    if mode == "web":
+        def on_open():
+            win = state.get("webview_window")
+            if win is not None:
+                try:
+                    win.show()
+                except Exception:
+                    pass
+        start_tray(on_open=on_open, on_quit=quit_app)
+        _start_core()
+        webview_app.run()  # blocks until window closed
+        # closing the window quits the app (tray also offers Quit)
+        quit_app()
+        return
+
+    if mode == "classic":
         import customtkinter as ctk
         from ui import StatusOverlay
         from app_gui import WhsprApp
@@ -678,33 +728,21 @@ def main() -> None:
         ctx = AppContext()
         app = WhsprApp(root, ctx)
         start_tray(on_open=app.show, on_quit=quit_app)
-        # first launch (no config yet): show the window so the user sees the app
         if not os.path.isfile(CONFIG_PATH):
             root.after(300, app.show)
-
-    def boot():
-        state["model"] = load_model()  # stock turbo, warm
-        set_status("idle")
-        log(f"ready. hold {config['hotkey'].upper()} = dictate "
-            f"({LANGUAGES[state['lang']]}), F10 = switch language")
-
-    threading.Thread(target=boot, daemon=True).start()
-
-    stream = sd.InputStream(
-        samplerate=SAMPLE_RATE, channels=1, dtype="float32",
-        blocksize=BLOCK, callback=audio_callback,
-    )
-    stream.start()
-    restart_listener()  # sets module-level _listener
-
-    try:
-        if root is not None:
+        _start_core()
+        try:
             root.mainloop()
-        else:
-            _listener.join()
+        except KeyboardInterrupt:
+            pass
+        return
+
+    # headless
+    _start_core()
+    try:
+        _listener.join()
     except KeyboardInterrupt:
         pass
-    stream.stop()
 
 
 if __name__ == "__main__":

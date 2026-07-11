@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<style>
+:root {
+  --s1:#16161C; --border:rgba(255,255,255,.10);
+  --t1:#F2F2F5; --t2:#9B9BA5; --accent:#F0555C; --green:#4CAF6D;
+}
+* { box-sizing:border-box; margin:0; }
+html,body { height:100%; background:transparent; overflow:hidden; user-select:none; }
+body { display:flex; align-items:center; justify-content:center;
+  font-family:'Inter',system-ui,'Segoe UI',sans-serif; }
+.mono { font-family:'JetBrains Mono','Cascadia Code',Consolas,monospace; font-variant-numeric:tabular-nums; }
+@keyframes waveScale { 0%,100%{transform:scaleY(.3);} 50%{transform:scaleY(1);} }
+@keyframes breathe { 0%,100%{opacity:.4;transform:scale(.8);} 50%{opacity:1;transform:scale(1.1);} }
+@keyframes pulseCoral { 0%{box-shadow:0 0 0 0 rgba(240,85,92,.5);} 70%{box-shadow:0 0 0 8px rgba(240,85,92,0);} 100%{box-shadow:0 0 0 0 rgba(240,85,92,0);} }
+@keyframes shimmerText { 0%{background-position:-200% 0;} 100%{background-position:200% 0;} }
+.pill {
+  display:flex; align-items:center; gap:9px; height:40px; padding:0 16px;
+  background:var(--s1); border:1px solid var(--border); border-radius:20px;
+  box-shadow:0 8px 30px rgba(0,0,0,.5); color:var(--t1); font-size:12.5px;
+  max-width:340px; white-space:nowrap;
+}
+.pill.rec { border-color:rgba(240,85,92,.4); }
+.dot { width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+.dot.idle { background:var(--t2); animation:breathe 2.6s ease-in-out infinite; }
+.dot.rec { background:var(--accent); animation:pulseCoral 1.6s infinite; }
+.dot.neutral { background:var(--t2); }
+.dot.ok { background:var(--green); }
+.wave { display:flex; align-items:center; gap:2px; height:16px; }
+.wave i { width:2px; background:var(--accent); border-radius:1px; height:100%;
+  transform-origin:center; animation:waveScale .9s ease-in-out infinite; display:block; }
+.txt { color:var(--t2); overflow:hidden; text-overflow:ellipsis; }
+.txt.done { color:var(--t1); }
+.shim { background:linear-gradient(90deg, var(--t2) 30%, #fff 50%, var(--t2) 70%);
+  background-size:200% 100%; -webkit-background-clip:text; background-clip:text;
+  color:transparent; animation:shimmerText 1.4s ease-in-out infinite; }
+.check { width:16px; height:16px; border-radius:50%; background:var(--green);
+  display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+</style>
+</head>
+<body>
+<div class="pill" id="pill"></div>
+<script>
+const pill = document.getElementById("pill");
+let recStart = 0, lastState = "";
+const fmt = (s) => `${String(Math.floor(s/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`;
+function bars(n){ let s=""; for(let i=0;i<n;i++){ const d=.6+Math.random()*.5, dl=Math.random()*.4;
+  s+=`<i style="animation-duration:${d}s;animation-delay:-${dl}s"></i>`; } return s; }
+
+async function tick(){
+  let p = { state:"idle" };
+  if (window.pywebview && window.pywebview.api && window.pywebview.api.get_pill) {
+    try { p = await window.pywebview.api.get_pill(); } catch(e){}
+  }
+  render(p);
+  requestAnimationFrame(() => setTimeout(tick, 280));
+}
+function render(p){
+  const s = p.state;
+  if (s !== lastState && s === "recording") recStart = Date.now();
+  lastState = s;
+  pill.className = "pill" + (s === "recording" ? " rec" : "");
+  if (s === "recording") {
+    const secs = Math.floor((Date.now() - recStart) / 1000);
+    pill.innerHTML = `<span class="dot rec"></span><span class="wave">${bars(16)}</span><span class="mono txt" style="color:var(--t1)">${fmt(secs)}</span>`;
+  } else if (s === "transcribing" || s === "loading") {
+    pill.innerHTML = `<span class="dot neutral"></span><span class="shim">Розпізнаю…</span>`;
+  } else if (s === "done") {
+    const t = (p.text || "").replace(/\n/g, " ");
+    const short = t.length > 34 ? t.slice(0, 33) + "…" : t;
+    pill.innerHTML = `<span class="check"><svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg></span><span class="mono txt done">«${short}»</span>`;
+  } else {
+    pill.innerHTML = `<span class="dot idle"></span><span class="txt">${p.hotkey || "Fn"} для диктування</span>`;
+  }
+}
+tick();
+</script>
+</body>
+</html>

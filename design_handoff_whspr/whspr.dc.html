@@ -1,0 +1,866 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    body { margin: 0; }
+    * { box-sizing: border-box; }
+    ::-webkit-scrollbar { width: 8px; height: 8px; }
+    ::-webkit-scrollbar-thumb { background: rgba(128,128,128,0.35); border-radius: 8px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    @keyframes waveScale { 0%, 100% { transform: scaleY(0.25); } 50% { transform: scaleY(1); } }
+    @keyframes breathe { 0%, 100% { opacity: 0.45; transform: scale(0.85); } 50% { opacity: 1; transform: scale(1.1); } }
+    @keyframes pulseCoral { 0% { box-shadow: 0 0 0 0 rgba(240,85,92,0.5); } 70% { box-shadow: 0 0 0 10px rgba(240,85,92,0); } 100% { box-shadow: 0 0 0 0 rgba(240,85,92,0); } }
+    @keyframes shimmerSweep { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+  </style>
+</helmet>
+
+<div style="{{ outerStyle }}">
+
+  <div style="{{ appShellStyle }}">
+
+    <div style="{{ sidebarStyle }}">
+      <div style="{{ brandRowStyle }}">
+        <div style="{{ brandMarkStyle }}">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path><path d="M19 10v1a7 7 0 0 1-14 0v-1"></path><line x1="12" y1="18" x2="12" y2="22"></line></svg>
+        </div>
+        <div style="{{ brandTextStyle }}">whspr</div>
+      </div>
+
+      <div style="{{ navListStyle }}">
+        <div style="{{ navIndicatorStyle }}"></div>
+
+        <button style="{{ navHomeStyle }}" onClick="{{ goHome }}">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"></path><path d="M5 9.5V20a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V9.5"></path></svg>
+          <span>Home</span>
+        </button>
+        <button style="{{ navHistoryStyle }}" onClick="{{ goHistory }}">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"></path><polyline points="3 4 3 9 8 9"></polyline><polyline points="12 7 12 12 16 14"></polyline></svg>
+          <span>History</span>
+        </button>
+        <button style="{{ navDictionaryStyle }}" onClick="{{ goDictionary }}">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v16H6.5A2.5 2.5 0 0 0 4 20.5"></path><path d="M4 4.5v16A2.5 2.5 0 0 0 6.5 23H20"></path></svg>
+          <span>Dictionary</span>
+        </button>
+        <button style="{{ navSettingsStyle }}" onClick="{{ goSettings }}">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"></path></svg>
+          <span>Settings</span>
+        </button>
+      </div>
+
+      <div style="{{ sidebarFooterStyle }}">
+        <div style="{{ gpuBadgeStyle }}">
+          <span style="{{ gpuDotStyle }}"></span>
+          <span>Локально · {{ gpuDevice }}</span>
+        </div>
+      </div>
+    </div>
+
+    <div style="{{ mainOuterStyle }}">
+      <div style="{{ topbarStyle }}">
+        <div style="{{ pageTitleStyle }}">{{ pageTitle }}</div>
+        <button style="{{ themeToggleStyle }}" onClick="{{ toggleTheme }}">
+          <sc-if value="{{ isDark }}" hint-placeholder-val="{{ true }}">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg>
+          </sc-if>
+          <sc-if value="{{ isLight }}">
+            <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z"></path></svg>
+          </sc-if>
+        </button>
+      </div>
+
+      <div style="{{ pageBodyStyle }}">
+
+        <sc-if value="{{ isHome }}" hint-placeholder-val="{{ true }}">
+          <div>
+            <div style="{{ heroCardStyle }}">
+              <sc-if value="{{ isIdle }}" hint-placeholder-val="{{ true }}">
+                <div style="{{ heroCenterStyle }}">
+                  <div style="{{ idleDotWrapStyle }}"><div style="{{ idleDotStyle }}"></div></div>
+                  <div style="{{ heroMicIconStyle }}">
+                    <svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path><path d="M19 10v1a7 7 0 0 1-14 0v-1"></path><line x1="12" y1="18" x2="12" y2="22"></line><line x1="8" y1="22" x2="16" y2="22"></line></svg>
+                  </div>
+                  <div style="{{ heroTitleStyle }}">Натисніть і утримуйте Fn</div>
+                  <div style="{{ heroSubStyle }}">щоб почати диктування будь-де на екрані</div>
+                </div>
+              </sc-if>
+              <sc-if value="{{ isRecording }}">
+                <div style="{{ heroCenterStyle }}">
+                  <div style="{{ recTimerStyle }}">{{ recordTimeText }}</div>
+                  <div style="{{ waveRowStyle }}">
+                    <sc-for list="{{ waveBarsHome }}" as="bar" hint-placeholder-count="40">
+                      <div style="{{ bar.style }}"></div>
+                    </sc-for>
+                  </div>
+                  <div style="{{ recLabelStyle }}"><span style="{{ recDotStyle }}"></span>Запис · відпустіть Fn, щоб завершити</div>
+                </div>
+              </sc-if>
+              <sc-if value="{{ isTranscribing }}">
+                <div style="{{ heroCenterStyle }}">
+                  <div style="{{ shimmerBlockStyle }}"></div>
+                  <div style="{{ shimmerBlockNarrowStyle }}"></div>
+                  <div style="{{ transcribingLabelStyle }}">Розпізнаю мовлення на GPU…</div>
+                </div>
+              </sc-if>
+
+              <div style="{{ heroPreviewRowStyle }}">
+                <button style="{{ previewBtnIdleStyle }}" onClick="{{ showIdle }}">Очікування</button>
+                <button style="{{ previewBtnRecordingStyle }}" onClick="{{ showRecording }}">Запис</button>
+                <button style="{{ previewBtnTranscribingStyle }}" onClick="{{ showTranscribing }}">Розпізнавання</button>
+              </div>
+            </div>
+
+            <div style="{{ statsGridStyle }}">
+              <div style="{{ statTileStyle }}">
+                <div style="{{ statLabelStyle }}">Слів сьогодні</div>
+                <div style="{{ statValueStyle }}">{{ statWordsToday }}</div>
+              </div>
+              <div style="{{ statTileStyle }}">
+                <div style="{{ statLabelStyle }}">Диктовок</div>
+                <div style="{{ statValueStyle }}">{{ statDictations }}</div>
+              </div>
+              <div style="{{ statTileStyle }}">
+                <div style="{{ statLabelStyle }}">Слів усього</div>
+                <div style="{{ statValueStyle }}">{{ statWordsTotal }}</div>
+              </div>
+              <div style="{{ statTileStyle }}">
+                <div style="{{ statLabelStyle }}">Слів/хв</div>
+                <div style="{{ statValueStyle }}">{{ statWpm }}</div>
+              </div>
+            </div>
+
+            <div style="{{ feedSectionStyle }}">
+              <div style="{{ feedHeaderStyle }}">Останні диктовки</div>
+              <sc-for list="{{ recentFeed }}" as="item" hint-placeholder-count="4">
+                <div style="{{ item.rowStyle }}">
+                  <div style="{{ item.timeStyle }}">{{ item.time }}</div>
+                  <div style="{{ item.textStyle }}">{{ item.text }}</div>
+                </div>
+              </sc-for>
+            </div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ isHistory }}">
+          <div>
+            <div style="{{ historyHeaderStyle }}">
+              <div style="{{ historyCountStyle }}">{{ historyCount }} диктовок</div>
+            </div>
+            <sc-for list="{{ historyView }}" as="item" hint-placeholder-count="5">
+              <div style="{{ item.cardStyle }}">
+                <div style="{{ item.actionsStyle }}">
+                  <button style="{{ item.copyBtnStyle }}" onClick="{{ item.onCopy }}">
+                    <sc-if value="{{ item.copied }}">
+                      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                    </sc-if>
+                    <sc-if value="{{ item.notCopied }}" hint-placeholder-val="{{ true }}">
+                      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+                    </sc-if>
+                  </button>
+                  <button style="{{ item.deleteBtnStyle }}" onClick="{{ item.onDelete }}">
+                    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path><path d="M10 11v6M14 11v6"></path></svg>
+                  </button>
+                </div>
+                <div style="{{ item.metaRowStyle }}">
+                  <span>{{ item.time }}</span>
+                  <span style="{{ item.dotStyle }}">·</span>
+                  <span style="{{ item.langChipStyle }}">UK</span>
+                  <span style="{{ item.dotStyle }}">·</span>
+                  <span>{{ item.duration }}</span>
+                </div>
+                <div style="{{ item.textStyle }}">{{ item.text }}</div>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ isDictionary }}">
+          <div>
+            <div style="{{ sectionCardStyle }}">
+              <div style="{{ sectionTitleStyle }}">Хотворди</div>
+              <div style="{{ sectionSubStyle }}">Терміни, які модель має розпізнавати з підвищеним пріоритетом — розділяйте комами</div>
+              <textarea style="{{ hotwordsTextareaStyle }}" value="{{ hotwordsText }}" onChange="{{ onHotwordsChange }}"></textarea>
+            </div>
+
+            <div style="{{ sectionCardStyle }}">
+              <div style="{{ commandsHeaderRowStyle }}">
+                <div>
+                  <div style="{{ sectionTitleStyle }}">Голосові команди</div>
+                  <div style="{{ sectionSubStyle }}">Промовте фразу зліва — whspr вставить символ праворуч. Наприклад: «нова думка» = ⏎</div>
+                </div>
+                <button style="{{ addCommandBtnStyle }}" onClick="{{ addCommand }}">
+                  <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+                  Додати
+                </button>
+              </div>
+              <div style="{{ commandsListStyle }}">
+                <sc-for list="{{ commandsView }}" as="cmd" hint-placeholder-count="5">
+                  <div style="{{ cmd.rowStyle }}">
+                    <input style="{{ cmd.phraseInputStyle }}" value="{{ cmd.phrase }}" onChange="{{ cmd.onPhraseChange }}"/>
+                    <span style="{{ cmd.eqStyle }}">=</span>
+                    <input style="{{ cmd.resultInputStyle }}" value="{{ cmd.result }}" onChange="{{ cmd.onResultChange }}"/>
+                    <button style="{{ cmd.deleteBtnStyle }}" onClick="{{ cmd.onDelete }}">
+                      <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                    </button>
+                  </div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ isSettings }}">
+          <div>
+            <div style="{{ sectionCardStyle }}">
+              <div style="{{ sectionTitleStyle }}">Загальні</div>
+              <div style="{{ settingRowStyle }}">
+                <div>
+                  <div style="{{ settingLabelStyle }}">Запускати з Windows</div>
+                  <div style="{{ settingHintStyle }}">Автоматично запускати whspr при вході в систему</div>
+                </div>
+                <button style="{{ toggleAutostartTrackStyle }}" onClick="{{ toggleAutostart }}"><div style="{{ toggleAutostartThumbStyle }}"></div></button>
+              </div>
+              <div style="{{ settingRowStyle }}">
+                <div>
+                  <div style="{{ settingLabelStyle }}">Показувати плаваючу панель</div>
+                  <div style="{{ settingHintStyle }}">Індикатор запису поверх усіх вікон</div>
+                </div>
+                <button style="{{ toggleFloatingTrackStyle }}" onClick="{{ toggleFloatingPanel }}"><div style="{{ toggleFloatingThumbStyle }}"></div></button>
+              </div>
+              <div style="{{ settingRowStyle }}">
+                <div>
+                  <div style="{{ settingLabelStyle }}">Звук при завершенні диктовки</div>
+                  <div style="{{ settingHintStyle }}">Короткий сигнал, коли текст готовий</div>
+                </div>
+                <button style="{{ toggleSoundTrackStyle }}" onClick="{{ toggleSound }}"><div style="{{ toggleSoundThumbStyle }}"></div></button>
+              </div>
+              <div style="{{ settingRowLastStyle }}">
+                <div>
+                  <div style="{{ settingLabelStyle }}">Автоматичне визначення мови</div>
+                  <div style="{{ settingHintStyle }}">whspr сам визначить українську чи англійську</div>
+                </div>
+                <button style="{{ toggleAutoLangTrackStyle }}" onClick="{{ toggleAutoLang }}"><div style="{{ toggleAutoLangThumbStyle }}"></div></button>
+              </div>
+            </div>
+
+            <div style="{{ sectionCardStyle }}">
+              <div style="{{ sectionTitleStyle }}">Гаряча клавіша</div>
+              <div style="{{ settingRowLastStyle }}">
+                <div>
+                  <div style="{{ settingLabelStyle }}">Утримувати для диктування</div>
+                  <div style="{{ settingHintStyle }}">Натисніть кнопку та виконайте потрібну комбінацію</div>
+                </div>
+                <button style="{{ hotkeyBtnStyle }}" onClick="{{ startHotkeyCapture }}">
+                  <sc-if value="{{ isListening }}">Слухаю…</sc-if>
+                  <sc-if value="{{ isNotListening }}" hint-placeholder-val="{{ true }}">{{ hotkeyCombo }}</sc-if>
+                </button>
+              </div>
+            </div>
+
+            <div style="{{ sectionCardStyle }}">
+              <div style="{{ sectionTitleStyle }}">Модель розпізнавання</div>
+              <div style="{{ settingRowStyle }}">
+                <div>
+                  <div style="{{ settingLabelStyle }}">Модель для української</div>
+                  <div style="{{ settingHintStyle }}">uk-ft — донавчена на розмовній українській</div>
+                </div>
+                <select style="{{ selectStyle }}" value="{{ model }}" onChange="{{ onModelChange }}">
+                  <option value="stock">stock-large-v3</option>
+                  <option value="uk-ft">uk-ft-v2 (рекомендовано)</option>
+                </select>
+              </div>
+              <div style="{{ settingRowLastStyle }}">
+                <div>
+                  <div style="{{ settingLabelStyle }}">Пристрій обробки</div>
+                  <div style="{{ settingHintStyle }}">Вся обробка виконується локально на цьому пристрої</div>
+                </div>
+                <select style="{{ selectStyle }}" value="{{ gpuDevice }}" onChange="{{ onGpuChange }}">
+                  <option value="RTX 4070">NVIDIA RTX 4070</option>
+                  <option value="RTX 4090">NVIDIA RTX 4090</option>
+                  <option value="CPU">CPU (запасний варіант)</option>
+                </select>
+              </div>
+            </div>
+
+            <div style="{{ sectionCardStyle }}">
+              <div style="{{ sectionTitleStyle }}">Приватність</div>
+              <div style="{{ privacyNoteStyle }}">
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 4 5v6c0 5 3.5 8.5 8 11 4.5-2.5 8-6 8-11V5l-8-3Z"></path></svg>
+                Диктовки ніколи не залишають цей пристрій
+              </div>
+              <div style="{{ settingRowLastStyle }}">
+                <div>
+                  <div style="{{ settingLabelStyle }}">Ключ шифрування резервної копії</div>
+                  <div style="{{ settingHintStyle }}">Необов'язково — для локального шифрованого бекапу</div>
+                </div>
+                <div style="{{ apiKeyWrapStyle }}">
+                  <input style="{{ apiKeyInputStyle }}" type="{{ apiKeyInputType }}" value="{{ apiKeyValue }}" readonly="{{ true }}"/>
+                  <button style="{{ eyeBtnStyle }}" onClick="{{ toggleApiKeyVisible }}">
+                    <sc-if value="{{ apiKeyVisible }}">
+                      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M17.9 17.9A10.6 10.6 0 0 1 12 19c-7 0-11-7-11-7a19 19 0 0 1 5-5.9M9.9 4.2A9.7 9.7 0 0 1 12 4c7 0 11 7 11 7a19 19 0 0 1-2.3 3.2M14.1 14.1a3 3 0 1 1-4.2-4.2"></path><line x1="2" y1="2" x2="22" y2="22"></line></svg>
+                    </sc-if>
+                    <sc-if value="{{ apiKeyHidden }}" hint-placeholder-val="{{ true }}">
+                      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z"></path><circle cx="12" cy="12" r="3"></circle></svg>
+                    </sc-if>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </sc-if>
+
+      </div>
+    </div>
+  </div>
+
+  <div style="{{ pillWrapStyle }}">
+    <div style="{{ pillStyle }}">
+      <sc-if value="{{ isPillRecording }}" hint-placeholder-val="{{ true }}">
+        <span style="{{ pillRecDotStyle }}"></span>
+        <div style="{{ pillWaveRowStyle }}">
+          <sc-for list="{{ waveBarsPill }}" as="bar" hint-placeholder-count="16">
+            <div style="{{ bar.style }}"></div>
+          </sc-for>
+        </div>
+        <span style="{{ pillTextStyle }}">{{ recordTimeText }}</span>
+      </sc-if>
+      <sc-if value="{{ isPillTranscribing }}">
+        <span style="{{ pillDotNeutralStyle }}"></span>
+        <span style="{{ pillShimmerTextStyle }}">Розпізнаю…</span>
+      </sc-if>
+      <sc-if value="{{ isPillDone }}">
+        <span style="{{ pillCheckWrapStyle }}">
+          <svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+        </span>
+        <span style="{{ pillDoneTextStyle }}">«{{ pillDoneText }}»</span>
+      </sc-if>
+      <sc-if value="{{ isPillIdle }}">
+        <span style="{{ pillDotIdleStyle }}"></span>
+        <span style="{{ pillIdleTextStyle }}">Fn для диктування</span>
+      </sc-if>
+    </div>
+    <div style="{{ pillControlsStyle }}">
+      <button style="{{ pillBtnStyle }}" onClick="{{ setPillIdleFn }}">Очікування</button>
+      <button style="{{ pillBtnStyle }}" onClick="{{ setPillRecordingFn }}">Запис</button>
+      <button style="{{ pillBtnStyle }}" onClick="{{ setPillTranscribingFn }}">Розпізнавання</button>
+      <button style="{{ pillBtnStyle }}" onClick="{{ setPillDoneFn }}">Готово</button>
+    </div>
+  </div>
+
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = {
+    theme: 'dark',
+    page: 'home',
+    homeState: 'idle',
+    recordSecs: 0,
+    statsShown: { wordsToday: 0, dictations: 0, wordsTotal: 0, wpm: 0 },
+    hotkeyState: 'idle',
+    hotkeyCombo: 'Fn',
+    apiKeyVisible: false,
+    pillState: 'recording',
+    toggles: { autostart: true, floatingPanel: true, sound: false, autoLang: true },
+    model: 'uk-ft',
+    gpuDevice: 'RTX 4070',
+    hotwordsText: 'Каролюся Шевченко, Нацбанк, гривня, Приватбанк, Docker, Kubernetes, GraphQL, React, TypeScript, Дія, whspr, Rust',
+    commands: [
+      { phrase: 'нова думка', result: '⏎⏎' },
+      { phrase: 'нова строка', result: '⏎' },
+      { phrase: 'кома', result: ',' },
+      { phrase: 'крапка', result: '.' },
+      { phrase: 'знак питання', result: '?' },
+      { phrase: 'стерти слово', result: '⌫ (слово)' }
+    ],
+    historyItems: [
+      { id: 1, time: 'Сьогодні, 14:32', duration: '0:47', text: 'Треба зателефонувати Оксані щодо контракту з Приватбанком до кінця тижня, бо дедлайн вже в п\'ятницю.', copied: false },
+      { id: 2, time: 'Сьогодні, 13:05', duration: '1:12', text: 'Нагадування собі: перевірити пул-реквест у GraphQL сервісі, там Максим лишив коментар про кешування запитів.', copied: false },
+      { id: 3, time: 'Сьогодні, 11:20', duration: '0:23', text: 'Купити каву, молоко і щось на вечерю. Ще заїхати забрати посилку з Нової пошти на Хрещатику.', copied: false },
+      { id: 4, time: 'Вчора, 18:47', duration: '2:03', text: 'Notatky do zustrichi z komandoju: obhovoryly mihratsiyu na Kubernetes, Andriy vzyav na sebe monitoring, Iryna — dokumentatsiyu.', copied: false },
+      { id: 5, time: 'Вчора, 09:14', duration: '0:58', text: 'Українська фінтех-команда домовилась перенести реліз на понеділок через тестування платіжного модуля.', copied: false }
+    ]
+  };
+
+  waveBarsHomeData = Array.from({ length: 40 }, (_, i) => ({
+    delay: +(((i * 0.083) % 1.6)).toFixed(2),
+    dur: +((0.7 + ((i * 53) % 60) / 100)).toFixed(2)
+  }));
+  waveBarsPillData = Array.from({ length: 16 }, (_, i) => ({
+    delay: +(((i * 0.11) % 1.2)).toFixed(2),
+    dur: +((0.6 + ((i * 41) % 50) / 100)).toFixed(2)
+  }));
+  statTargets = { wordsToday: 2481, dictations: 37, wordsTotal: 184920, wpm: 132 };
+
+  componentDidMount() {
+    const steps = 40;
+    let step = 0;
+    const tg = this.statTargets;
+    this._statInterval = setInterval(() => {
+      step += 1;
+      const p = Math.min(1, step / steps);
+      const ease = 1 - Math.pow(1 - p, 3);
+      this.setState({
+        statsShown: {
+          wordsToday: Math.round(tg.wordsToday * ease),
+          dictations: Math.round(tg.dictations * ease),
+          wordsTotal: Math.round(tg.wordsTotal * ease),
+          wpm: Math.round(tg.wpm * ease)
+        }
+      });
+      if (step >= steps) clearInterval(this._statInterval);
+    }, 35);
+
+    this._recordTimer = setInterval(() => {
+      if (this.state.homeState === 'recording') {
+        this.setState((s) => ({ recordSecs: s.recordSecs + 1 }));
+      }
+    }, 1000);
+
+    this._pillCycle = setInterval(() => this.cyclePill(), 4200);
+  }
+
+  componentWillUnmount() {
+    clearInterval(this._statInterval);
+    clearInterval(this._recordTimer);
+    clearInterval(this._pillCycle);
+    if (this._hotkeyHandler) document.removeEventListener('keydown', this._hotkeyHandler, true);
+  }
+
+  toggleTheme = () => this.setState((s) => ({ theme: s.theme === 'dark' ? 'light' : 'dark' }));
+  goHome = () => this.setState({ page: 'home' });
+  goHistory = () => this.setState({ page: 'history' });
+  goDictionary = () => this.setState({ page: 'dictionary' });
+  goSettings = () => this.setState({ page: 'settings' });
+
+  showIdle = () => this.setState({ homeState: 'idle' });
+  showRecording = () => this.setState({ homeState: 'recording', recordSecs: 0 });
+  showTranscribing = () => this.setState({ homeState: 'transcribing' });
+
+  startHotkeyCapture = () => {
+    if (this.state.hotkeyState === 'listening') return;
+    this.setState({ hotkeyState: 'listening' });
+    const handler = (e) => {
+      e.preventDefault();
+      const parts = [];
+      if (e.ctrlKey) parts.push('Ctrl');
+      if (e.altKey) parts.push('Alt');
+      if (e.shiftKey) parts.push('Shift');
+      if (!['Control', 'Alt', 'Shift'].includes(e.key)) {
+        const key = e.key.length === 1 ? e.key.toUpperCase() : e.key;
+        parts.push(key);
+      }
+      if (parts.length) {
+        this.setState({ hotkeyCombo: parts.join('+'), hotkeyState: 'idle' });
+        document.removeEventListener('keydown', handler, true);
+        this._hotkeyHandler = null;
+      }
+    };
+    this._hotkeyHandler = handler;
+    document.addEventListener('keydown', handler, true);
+  };
+
+  toggleAutostart = () => this.setState((s) => ({ toggles: { ...s.toggles, autostart: !s.toggles.autostart } }));
+  toggleFloatingPanel = () => this.setState((s) => ({ toggles: { ...s.toggles, floatingPanel: !s.toggles.floatingPanel } }));
+  toggleSound = () => this.setState((s) => ({ toggles: { ...s.toggles, sound: !s.toggles.sound } }));
+  toggleAutoLang = () => this.setState((s) => ({ toggles: { ...s.toggles, autoLang: !s.toggles.autoLang } }));
+  toggleApiKeyVisible = () => this.setState((s) => ({ apiKeyVisible: !s.apiKeyVisible }));
+  onModelChange = (e) => this.setState({ model: e.target.value });
+  onGpuChange = (e) => this.setState({ gpuDevice: e.target.value });
+  onHotwordsChange = (e) => this.setState({ hotwordsText: e.target.value });
+
+  addCommand = () => this.setState((s) => ({ commands: [...s.commands, { phrase: '', result: '' }] }));
+  updateCommand = (i, key, val) => this.setState((s) => {
+    const commands = s.commands.slice();
+    commands[i] = { ...commands[i], [key]: val };
+    return { commands };
+  });
+  deleteCommand = (i) => this.setState((s) => ({ commands: s.commands.filter((_, idx) => idx !== i) }));
+
+  onCopyItem = (id, text) => {
+    if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).catch(() => {});
+    this.setState((s) => ({ historyItems: s.historyItems.map((it) => it.id === id ? { ...it, copied: true } : it) }));
+    clearTimeout(this['_copyT' + id]);
+    this['_copyT' + id] = setTimeout(() => {
+      this.setState((s) => ({ historyItems: s.historyItems.map((it) => it.id === id ? { ...it, copied: false } : it) }));
+    }, 1400);
+  };
+  onDeleteItem = (id) => this.setState((s) => ({ historyItems: s.historyItems.filter((it) => it.id !== id) }));
+
+  cyclePill = () => {
+    this.setState((s) => {
+      const order = ['idle', 'recording', 'transcribing', 'done'];
+      const idx = order.indexOf(s.pillState);
+      return { pillState: order[(idx + 1) % order.length], recordSecs: 0 };
+    });
+  };
+  setPillState = (s) => {
+    clearInterval(this._pillCycle);
+    this.setState({ pillState: s, recordSecs: 0 });
+  };
+
+  renderVals() {
+    const dark = this.state.theme === 'dark';
+    const c = dark ? {
+      bg0: '#0E0E12', surf1: '#16161C', surf2: '#1E1E26', surf3: '#262630',
+      border: 'rgba(255,255,255,0.08)', borderStrong: 'rgba(255,255,255,0.16)',
+      text: '#F2F2F5', text2: '#9B9BA5', text3: '#6B6B75',
+      backdrop: '#08080A',
+      shadow: '0 24px 70px rgba(0,0,0,0.6), 0 2px 10px rgba(0,0,0,0.45)',
+      trackOff: '#33333D', barIdle: '#3C3C46'
+    } : {
+      bg0: '#FAFAFB', surf1: '#FFFFFF', surf2: '#F3F3F5', surf3: '#ECECEF',
+      border: 'rgba(0,0,0,0.08)', borderStrong: 'rgba(0,0,0,0.14)',
+      text: '#16161C', text2: '#6B6B75', text3: '#9B9BA5',
+      backdrop: '#E7E7EA',
+      shadow: '0 24px 70px rgba(0,0,0,0.14), 0 2px 10px rgba(0,0,0,0.06)',
+      trackOff: '#D8D8DD', barIdle: '#D2D2D8'
+    };
+    const accent = '#F0555C';
+    const accentHover = '#E14750';
+    const accentSoft = dark ? 'rgba(240,85,92,0.16)' : 'rgba(240,85,92,0.10)';
+    const accentSoftStrong = 'rgba(240,85,92,0.28)';
+    const mono = "'JetBrains Mono', ui-monospace, monospace";
+    const sans = "'Inter', ui-sans-serif, system-ui, sans-serif";
+
+    const page = this.state.page;
+    const isHome = page === 'home', isHistory = page === 'history', isDictionary = page === 'dictionary', isSettings = page === 'settings';
+    const titles = { home: 'Home', history: 'History', dictionary: 'Dictionary', settings: 'Settings' };
+    const navIndex = { home: 0, history: 1, dictionary: 2, settings: 3 }[page];
+
+    const outerStyle = {
+      minHeight: '100vh', width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+      background: dark
+        ? 'radial-gradient(1200px 700px at 50% 20%, #131318 0%, #08080A 70%)'
+        : 'radial-gradient(1200px 700px at 50% 20%, #F1F1F3 0%, #E3E3E7 70%)',
+      fontFamily: sans, padding: '48px 24px 130px', position: 'relative'
+    };
+
+    const appShellStyle = {
+      width: '960px', height: '620px', display: 'flex', borderRadius: '16px', overflow: 'hidden',
+      background: c.bg0, boxShadow: c.shadow, border: '1px solid ' + c.border
+    };
+
+    const sidebarStyle = {
+      width: '204px', flexShrink: 0, background: c.surf1, borderRight: '1px solid ' + c.border,
+      display: 'flex', flexDirection: 'column', padding: '18px 12px'
+    };
+    const brandRowStyle = { display: 'flex', alignItems: 'center', gap: '8px', padding: '4px 8px 20px' };
+    const brandMarkStyle = {
+      width: '24px', height: '24px', borderRadius: '7px', background: c.surf3, border: '1px solid ' + c.borderStrong,
+      display: 'flex', alignItems: 'center', justifyContent: 'center', color: c.text
+    };
+    const brandTextStyle = { fontSize: '14px', fontWeight: 700, letterSpacing: '-0.02em', color: c.text };
+
+    const navListStyle = { position: 'relative', display: 'flex', flexDirection: 'column', gap: '2px' };
+    const navIndicatorStyle = {
+      position: 'absolute', top: (navIndex * 40) + 'px', left: 0, right: 0, height: '36px',
+      background: c.surf3, borderRadius: '9px', transition: 'top 220ms cubic-bezier(0.34, 1.56, 0.64, 1)', zIndex: 0
+    };
+    const navBase = (active) => ({
+      position: 'relative', zIndex: 1, display: 'flex', alignItems: 'center', gap: '10px',
+      height: '36px', padding: '0 10px', borderRadius: '9px', border: 'none', background: 'transparent',
+      color: active ? c.text : c.text2, fontSize: '13px', fontWeight: active ? 600 : 500, fontFamily: sans,
+      cursor: 'pointer', textAlign: 'left', width: '100%'
+    });
+    const navHomeStyle = navBase(page === 'home');
+    const navHistoryStyle = navBase(page === 'history');
+    const navDictionaryStyle = navBase(page === 'dictionary');
+    const navSettingsStyle = navBase(page === 'settings');
+
+    const sidebarFooterStyle = { marginTop: 'auto', padding: '8px' };
+    const gpuBadgeStyle = {
+      display: 'flex', alignItems: 'center', gap: '7px', fontSize: '11px', color: c.text3,
+      fontFamily: mono, padding: '8px 0 0'
+    };
+    const gpuDotStyle = { width: '6px', height: '6px', borderRadius: '50%', background: '#4CAF6D', display: 'inline-block' };
+
+    const mainOuterStyle = { flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 };
+    const topbarStyle = {
+      height: '52px', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      padding: '0 24px', borderBottom: '1px solid ' + c.border
+    };
+    const pageTitleStyle = { fontSize: '13px', fontWeight: 600, color: c.text2, letterSpacing: '0.01em' };
+    const themeToggleStyle = {
+      width: '30px', height: '30px', borderRadius: '8px', border: '1px solid ' + c.border, background: c.surf2,
+      color: c.text2, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer'
+    };
+    const pageBodyStyle = { flex: 1, overflowY: 'auto', padding: '22px 24px 32px' };
+
+    // Home
+    const isIdle = this.state.homeState === 'idle', isRecording = this.state.homeState === 'recording', isTranscribing = this.state.homeState === 'transcribing';
+    const heroCardStyle = {
+      background: c.surf1, border: '1px solid ' + c.border, borderRadius: '14px', padding: '30px 20px 18px',
+      display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '16px', marginBottom: '16px'
+    };
+    const heroCenterStyle = { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', minHeight: '96px', justifyContent: 'center', width: '100%' };
+    const idleDotWrapStyle = { width: '10px', height: '10px', display: 'flex', alignItems: 'center', justifyContent: 'center' };
+    const idleDotStyle = { width: '6px', height: '6px', borderRadius: '50%', background: c.text3, animation: 'breathe 2.6s ease-in-out infinite' };
+    const heroMicIconStyle = { color: c.text3, marginTop: '-4px' };
+    const heroTitleStyle = { fontSize: '15px', fontWeight: 600, color: c.text };
+    const heroSubStyle = { fontSize: '12.5px', color: c.text3 };
+
+    const recSecs = this.state.recordSecs;
+    const mm = String(Math.floor(recSecs / 60)).padStart(2, '0');
+    const ss = String(recSecs % 60).padStart(2, '0');
+    const recordTimeText = mm + ':' + ss;
+    const recTimerStyle = { fontFamily: mono, fontSize: '26px', fontWeight: 600, color: c.text, fontVariantNumeric: 'tabular-nums' };
+    const waveRowStyle = { display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '3px', height: '40px' };
+    const waveBarsHome = this.waveBarsHomeData.map((b) => ({
+      style: { width: '3px', height: '32px', borderRadius: '2px', background: accent, animation: `waveScale ${b.dur}s ease-in-out ${b.delay}s infinite` }
+    }));
+    const recLabelStyle = { fontSize: '12.5px', color: c.text2, display: 'flex', alignItems: 'center', gap: '7px' };
+    const recDotStyle = { width: '7px', height: '7px', borderRadius: '50%', background: accent, display: 'inline-block', animation: 'pulseCoral 1.6s ease-out infinite' };
+
+    const shimmerGrad = dark
+      ? `linear-gradient(90deg, ${c.surf3} 25%, #34343E 50%, ${c.surf3} 75%)`
+      : `linear-gradient(90deg, ${c.surf3} 25%, #FFFFFF 50%, ${c.surf3} 75%)`;
+    const shimmerBlockStyle = { width: '220px', height: '14px', borderRadius: '7px', background: shimmerGrad, backgroundSize: '200% 100%', animation: 'shimmerSweep 1.4s ease-in-out infinite' };
+    const shimmerBlockNarrowStyle = { width: '140px', height: '14px', borderRadius: '7px', background: shimmerGrad, backgroundSize: '200% 100%', animation: 'shimmerSweep 1.4s ease-in-out infinite', animationDelay: '0.15s' };
+    const transcribingLabelStyle = { fontSize: '12.5px', color: c.text3, marginTop: '4px' };
+
+    const previewRowBase = { display: 'flex', gap: '6px', marginTop: '6px' };
+    const heroPreviewRowStyle = previewRowBase;
+    const previewBtnBase = (active) => ({
+      fontSize: '11.5px', fontWeight: 500, padding: '6px 11px', borderRadius: '7px', cursor: 'pointer',
+      border: '1px solid ' + (active ? accentSoftStrong : c.border), background: active ? accentSoft : c.surf2,
+      color: active ? accent : c.text2, fontFamily: sans
+    });
+    const previewBtnIdleStyle = previewBtnBase(isIdle);
+    const previewBtnRecordingStyle = previewBtnBase(isRecording);
+    const previewBtnTranscribingStyle = previewBtnBase(isTranscribing);
+
+    const statsGridStyle = { display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginBottom: '18px' };
+    const statTileStyle = { background: c.surf1, border: '1px solid ' + c.border, borderRadius: '12px', padding: '13px 14px' };
+    const statLabelStyle = { fontSize: '11px', color: c.text3, marginBottom: '6px' };
+    const statValueStyle = { fontFamily: mono, fontSize: '19px', fontWeight: 600, color: c.text, fontVariantNumeric: 'tabular-nums' };
+
+    const s = this.state.statsShown;
+    const statWordsToday = s.wordsToday.toLocaleString('uk-UA');
+    const statDictations = String(s.dictations);
+    const statWordsTotal = s.wordsTotal.toLocaleString('uk-UA');
+    const statWpm = String(s.wpm);
+
+    const feedSectionStyle = { background: c.surf1, border: '1px solid ' + c.border, borderRadius: '12px', padding: '4px 0' };
+    const feedHeaderStyle = { fontSize: '11.5px', fontWeight: 600, color: c.text3, padding: '10px 16px 6px', textTransform: 'uppercase', letterSpacing: '0.04em' };
+
+    const historyItems = this.state.historyItems;
+    const recentFeed = historyItems.slice(0, 4).map((it, i) => ({
+      time: it.time, text: it.text,
+      rowStyle: { display: 'flex', gap: '16px', padding: '10px 16px', borderTop: i === 0 ? 'none' : '1px solid ' + c.border },
+      timeStyle: { fontFamily: mono, fontSize: '11px', color: c.text3, flexShrink: 0, width: '92px', paddingTop: '1px' },
+      textStyle: { fontFamily: mono, fontSize: '12.5px', color: c.text2, lineHeight: 1.5 }
+    }));
+
+    // History
+    const historyCount = historyItems.length;
+    const historyHeaderStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' };
+    const historyCountStyle = { fontSize: '12px', color: c.text3, fontFamily: mono };
+    const historyView = historyItems.map((it) => ({
+      id: it.id, time: it.time, duration: it.duration, text: it.text, copied: it.copied, notCopied: !it.copied,
+      cardStyle: {
+        position: 'relative', background: c.surf1, border: '1px solid ' + c.border, borderRadius: '12px',
+        padding: '14px 16px', marginBottom: '10px'
+      },
+      actionsStyle: { position: 'absolute', top: '10px', right: '10px', display: 'flex', gap: '5px' },
+      copyBtnStyle: {
+        width: '25px', height: '25px', borderRadius: '7px', border: '1px solid ' + c.border, background: c.surf2,
+        color: it.copied ? '#4CAF6D' : c.text3, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer'
+      },
+      deleteBtnStyle: {
+        width: '25px', height: '25px', borderRadius: '7px', border: '1px solid ' + c.border, background: c.surf2,
+        color: c.text3, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer'
+      },
+      metaRowStyle: { display: 'flex', alignItems: 'center', gap: '7px', fontSize: '11.5px', color: c.text3, fontFamily: mono, marginBottom: '8px' },
+      dotStyle: { color: c.text3 },
+      langChipStyle: { background: c.surf3, borderRadius: '4px', padding: '1px 5px', fontSize: '10.5px', fontWeight: 600, color: c.text2 },
+      textStyle: { fontFamily: mono, fontSize: '13px', color: c.text, lineHeight: 1.6, paddingRight: '52px' },
+      onCopy: () => this.onCopyItem(it.id, it.text),
+      onDelete: () => this.onDeleteItem(it.id)
+    }));
+
+    // Dictionary
+    const sectionCardStyle = { background: c.surf1, border: '1px solid ' + c.border, borderRadius: '12px', padding: '16px 18px', marginBottom: '14px' };
+    const sectionTitleStyle = { fontSize: '13.5px', fontWeight: 600, color: c.text, marginBottom: '4px' };
+    const sectionSubStyle = { fontSize: '12px', color: c.text3, marginBottom: '12px', lineHeight: 1.5 };
+    const hotwordsTextareaStyle = {
+      width: '100%', minHeight: '84px', resize: 'vertical', background: c.surf2, border: '1px solid ' + c.border,
+      borderRadius: '9px', padding: '11px 12px', fontFamily: mono, fontSize: '12.5px', color: c.text, lineHeight: 1.6
+    };
+
+    const commandsHeaderRowStyle = { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px' };
+    const addCommandBtnStyle = {
+      display: 'flex', alignItems: 'center', gap: '5px', fontSize: '12px', fontWeight: 500, color: c.text2,
+      background: c.surf2, border: '1px solid ' + c.border, borderRadius: '7px', padding: '6px 10px', cursor: 'pointer',
+      flexShrink: 0, fontFamily: sans
+    };
+    const commandsListStyle = { display: 'flex', flexDirection: 'column', gap: '7px', marginTop: '12px' };
+    const commandsView = this.state.commands.map((cmd, i) => ({
+      phrase: cmd.phrase, result: cmd.result,
+      rowStyle: { display: 'flex', alignItems: 'center', gap: '8px' },
+      phraseInputStyle: {
+        flex: 1, background: c.surf2, border: '1px solid ' + c.border, borderRadius: '7px', padding: '8px 10px',
+        fontFamily: mono, fontSize: '12.5px', color: c.text
+      },
+      resultInputStyle: {
+        width: '110px', background: c.surf2, border: '1px solid ' + c.border, borderRadius: '7px', padding: '8px 10px',
+        fontFamily: mono, fontSize: '12.5px', color: c.text, textAlign: 'center'
+      },
+      eqStyle: { color: c.text3, fontSize: '12px', flexShrink: 0 },
+      deleteBtnStyle: {
+        width: '28px', height: '28px', flexShrink: 0, borderRadius: '7px', border: '1px solid ' + c.border, background: 'transparent',
+        color: c.text3, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer'
+      },
+      onPhraseChange: (e) => this.updateCommand(i, 'phrase', e.target.value),
+      onResultChange: (e) => this.updateCommand(i, 'result', e.target.value),
+      onDelete: () => this.deleteCommand(i)
+    }));
+
+    // Settings
+    const settingRowStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', padding: '13px 0', borderBottom: '1px solid ' + c.border };
+    const settingRowLastStyle = { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', padding: '13px 0' };
+    const settingLabelStyle = { fontSize: '13px', fontWeight: 500, color: c.text, marginBottom: '2px' };
+    const settingHintStyle = { fontSize: '11.5px', color: c.text3 };
+
+    const toggleTrackStyle = (on) => ({
+      width: '38px', height: '22px', borderRadius: '11px', border: 'none', cursor: 'pointer', flexShrink: 0,
+      background: on ? accent : c.trackOff, position: 'relative', transition: 'background 180ms ease'
+    });
+    const toggleThumbStyle = (on) => ({
+      width: '16px', height: '16px', borderRadius: '50%', background: '#fff', position: 'absolute', top: '3px',
+      left: on ? '19px' : '3px', transition: 'left 180ms cubic-bezier(0.34,1.56,0.64,1)', boxShadow: '0 1px 3px rgba(0,0,0,0.3)'
+    });
+    const t = this.state.toggles;
+    const toggleAutostartTrackStyle = toggleTrackStyle(t.autostart);
+    const toggleAutostartThumbStyle = toggleThumbStyle(t.autostart);
+    const toggleFloatingTrackStyle = toggleTrackStyle(t.floatingPanel);
+    const toggleFloatingThumbStyle = toggleThumbStyle(t.floatingPanel);
+    const toggleSoundTrackStyle = toggleTrackStyle(t.sound);
+    const toggleSoundThumbStyle = toggleThumbStyle(t.sound);
+    const toggleAutoLangTrackStyle = toggleTrackStyle(t.autoLang);
+    const toggleAutoLangThumbStyle = toggleThumbStyle(t.autoLang);
+
+    const isListening = this.state.hotkeyState === 'listening';
+    const isNotListening = !isListening;
+    const hotkeyBtnStyle = {
+      fontFamily: mono, fontSize: '12.5px', fontWeight: 600, padding: '8px 16px', borderRadius: '8px', cursor: 'pointer',
+      border: '1px solid ' + (isListening ? accent : c.border), background: isListening ? accentSoft : c.surf2,
+      color: isListening ? accent : c.text, boxShadow: isListening ? '0 0 0 3px ' + accentSoft : 'none', transition: 'all 150ms ease'
+    };
+
+    const selectStyle = {
+      fontSize: '12.5px', fontFamily: sans, color: c.text, background: c.surf2, border: '1px solid ' + c.border,
+      borderRadius: '8px', padding: '8px 10px', cursor: 'pointer', minWidth: '170px'
+    };
+
+    const privacyNoteStyle = {
+      display: 'flex', alignItems: 'center', gap: '7px', fontSize: '12px', color: '#4CAF6D',
+      background: dark ? 'rgba(76,175,109,0.12)' : 'rgba(76,175,109,0.10)', borderRadius: '8px', padding: '9px 12px', marginBottom: '4px'
+    };
+    const apiKeyVisible = this.state.apiKeyVisible;
+    const apiKeyHidden = !apiKeyVisible;
+    const apiKeyInputType = apiKeyVisible ? 'text' : 'password';
+    const apiKeyWrapStyle = { display: 'flex', alignItems: 'center', gap: '6px' };
+    const apiKeyInputStyle = {
+      width: '190px', fontFamily: mono, fontSize: '12.5px', color: c.text2, background: c.surf2,
+      border: '1px solid ' + c.border, borderRadius: '8px', padding: '8px 10px'
+    };
+    const eyeBtnStyle = {
+      width: '30px', height: '30px', borderRadius: '8px', border: '1px solid ' + c.border, background: c.surf2,
+      color: c.text3, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', flexShrink: 0
+    };
+
+    // Signature pill overlay
+    const pillState = this.state.pillState;
+    const isPillIdle = pillState === 'idle', isPillRecording = pillState === 'recording', isPillTranscribing = pillState === 'transcribing', isPillDone = pillState === 'done';
+    const pillWrapStyle = { position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px', marginTop: '28px' };
+    const pillBaseBg = dark ? '#1B1B22' : '#FFFFFF';
+    const pillStyle = {
+      display: 'flex', alignItems: 'center', gap: '9px', height: '40px', padding: '0 16px', borderRadius: '20px',
+      background: pillBaseBg, border: '1px solid ' + (isPillRecording ? accentSoftStrong : c.borderStrong),
+      boxShadow: dark ? '0 12px 32px rgba(0,0,0,0.5)' : '0 12px 32px rgba(0,0,0,0.18)',
+      transition: 'border-color 200ms ease', minWidth: '150px', justifyContent: 'center'
+    };
+    const pillRecDotStyle = { width: '8px', height: '8px', borderRadius: '50%', background: accent, flexShrink: 0, animation: 'pulseCoral 1.6s ease-out infinite' };
+    const pillWaveRowStyle = { display: 'flex', alignItems: 'center', gap: '2px', height: '18px' };
+    const waveBarsPill = this.waveBarsPillData.map((b) => ({
+      style: { width: '2px', height: '16px', borderRadius: '2px', background: accent, animation: `waveScale ${b.dur}s ease-in-out ${b.delay}s infinite` }
+    }));
+    const pillTextStyle = { fontFamily: mono, fontSize: '12px', fontWeight: 600, color: c.text, fontVariantNumeric: 'tabular-nums' };
+    const pillDotNeutralStyle = { width: '7px', height: '7px', borderRadius: '50%', background: c.text3, flexShrink: 0 };
+    const pillShimmerTextStyle = {
+      fontSize: '12px', fontWeight: 500, color: 'transparent', backgroundImage: shimmerGrad.replace(c.surf3, c.text2).replace('#34343E', c.text).replace('#FFFFFF', c.text),
+      backgroundSize: '200% 100%', WebkitBackgroundClip: 'text', backgroundClip: 'text', animation: 'shimmerSweep 1.2s ease-in-out infinite'
+    };
+    const pillCheckWrapStyle = {
+      width: '16px', height: '16px', borderRadius: '50%', background: '#4CAF6D', color: '#fff', flexShrink: 0,
+      display: 'flex', alignItems: 'center', justifyContent: 'center'
+    };
+    const pillDoneText = 'зателефонувати Оксані до п\'ятниці';
+    const pillDoneTextStyle = { fontSize: '12px', fontWeight: 500, color: c.text, fontFamily: mono, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '220px' };
+    const pillDotIdleStyle = { width: '7px', height: '7px', borderRadius: '50%', background: c.text3, animation: 'breathe 2.6s ease-in-out infinite' };
+    const pillIdleTextStyle = { fontSize: '12px', fontWeight: 500, color: c.text2 };
+
+    const pillControlsStyle = { display: 'flex', gap: '5px' };
+    const pillBtnStyle = {
+      fontSize: '10.5px', fontWeight: 500, padding: '5px 9px', borderRadius: '6px', cursor: 'pointer',
+      border: '1px solid ' + c.border, background: dark ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)', color: c.text3, fontFamily: sans
+    };
+
+    return {
+      isDark: dark, isLight: !dark, toggleTheme: this.toggleTheme,
+      outerStyle, appShellStyle, sidebarStyle, brandRowStyle, brandMarkStyle, brandTextStyle,
+      navListStyle, navIndicatorStyle, navHomeStyle, navHistoryStyle, navDictionaryStyle, navSettingsStyle,
+      goHome: this.goHome, goHistory: this.goHistory, goDictionary: this.goDictionary, goSettings: this.goSettings,
+      sidebarFooterStyle, gpuBadgeStyle, gpuDotStyle, gpuDevice: this.state.gpuDevice,
+      mainOuterStyle, topbarStyle, pageTitleStyle: pageTitleStyle, pageTitle: titles[page], themeToggleStyle, pageBodyStyle,
+      isHome, isHistory, isDictionary, isSettings,
+
+      isIdle, isRecording, isTranscribing, heroCardStyle, heroCenterStyle, idleDotWrapStyle, idleDotStyle, heroMicIconStyle,
+      heroTitleStyle, heroSubStyle, recordTimeText, recTimerStyle, waveRowStyle, waveBarsHome, recLabelStyle, recDotStyle,
+      shimmerBlockStyle, shimmerBlockNarrowStyle, transcribingLabelStyle,
+      heroPreviewRowStyle, previewBtnIdleStyle, previewBtnRecordingStyle, previewBtnTranscribingStyle,
+      showIdle: this.showIdle, showRecording: this.showRecording, showTranscribing: this.showTranscribing,
+      statsGridStyle, statTileStyle, statLabelStyle, statValueStyle, statWordsToday, statDictations, statWordsTotal, statWpm,
+      feedSectionStyle, feedHeaderStyle, recentFeed,
+
+      historyHeaderStyle, historyCountStyle, historyCount, historyView,
+
+      sectionCardStyle, sectionTitleStyle, sectionSubStyle, hotwordsTextareaStyle, hotwordsText: this.state.hotwordsText, onHotwordsChange: this.onHotwordsChange,
+      commandsHeaderRowStyle, addCommandBtnStyle, addCommand: this.addCommand, commandsListStyle, commandsView,
+
+      settingRowStyle, settingRowLastStyle, settingLabelStyle, settingHintStyle,
+      toggleAutostartTrackStyle, toggleAutostartThumbStyle, toggleAutostart: this.toggleAutostart,
+      toggleFloatingTrackStyle, toggleFloatingThumbStyle, toggleFloatingPanel: this.toggleFloatingPanel,
+      toggleSoundTrackStyle, toggleSoundThumbStyle, toggleSound: this.toggleSound,
+      toggleAutoLangTrackStyle, toggleAutoLangThumbStyle, toggleAutoLang: this.toggleAutoLang,
+      isListening, isNotListening, hotkeyCombo: this.state.hotkeyCombo, hotkeyBtnStyle, startHotkeyCapture: this.startHotkeyCapture,
+      selectStyle, model: this.state.model, onModelChange: this.onModelChange, onGpuChange: this.onGpuChange,
+      privacyNoteStyle, apiKeyWrapStyle, apiKeyInputStyle, apiKeyInputType, apiKeyValue: 'wh_local_9f2a-encrypted-8b31',
+      apiKeyVisible, apiKeyHidden, eyeBtnStyle, toggleApiKeyVisible: this.toggleApiKeyVisible,
+
+      pillWrapStyle, pillStyle, isPillIdle, isPillRecording, isPillTranscribing, isPillDone,
+      pillRecDotStyle, pillWaveRowStyle, waveBarsPill, pillTextStyle,
+      pillDotNeutralStyle, pillShimmerTextStyle, pillCheckWrapStyle, pillDoneText, pillDoneTextStyle,
+      pillDotIdleStyle, pillIdleTextStyle, pillControlsStyle, pillBtnStyle,
+      setPillIdleFn: () => this.setPillState('idle'),
+      setPillRecordingFn: () => this.setPillState('recording'),
+      setPillTranscribingFn: () => this.setPillState('transcribing'),
+      setPillDoneFn: () => this.setPillState('done')
+    };
+  }
+}
+</script>
+</body>
+</html>

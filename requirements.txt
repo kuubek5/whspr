@@ -5,6 +5,8 @@ pyperclip>=1.11
 numpy
 pystray>=0.19
 pillow
+pywebview>=6.0
+# customtkinter powers the older --classic UI; the default UI is pywebview (web/)
 customtkinter>=6.0
 # CUDA runtime for ctranslate2 (no system CUDA toolkit needed)
 nvidia-cublas-cu12
