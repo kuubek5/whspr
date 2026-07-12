@@ -107,18 +107,26 @@ function stopMicTest() {
   clearInterval(micTestTimer); micTestTimer = null;
   api("mic_test", false);
 }
+let micTestPeak = 0;
 async function toggleMicTest(btn) {
   if (micTestTimer) {
     stopMicTest(); btn.textContent = "Перевірити"; btn.classList.remove("active");
     const f = document.getElementById("levelFill"); if (f) f.style.width = "0";
+    const hint = document.getElementById("micHint"); if (hint) hint.textContent = "";
     return;
   }
   await api("mic_test", true);
-  btn.textContent = "Стоп"; btn.classList.add("active");
+  btn.textContent = "Стоп"; btn.classList.add("active"); micTestPeak = 0;
   micTestTimer = setInterval(async () => {
     const lvl = await api("get_input_level");
+    micTestPeak = Math.max(micTestPeak, lvl);
     const f = document.getElementById("levelFill");
-    if (f) f.style.width = Math.min(100, (lvl / 0.1) * 100) + "%";
+    if (f) { f.style.width = Math.min(100, (lvl / 0.1) * 100) + "%";
+             f.style.background = lvl > 0.02 ? "var(--green)" : "var(--accent)"; }
+    const hint = document.getElementById("micHint");
+    if (hint) hint.textContent = micTestPeak > 0.02
+      ? "Мікрофон чує голос ✓"
+      : "Говоріть у мікрофон… Якщо смужка майже не рухається — підніміть гучність мікрофона у Windows (Звук → Ввід → Властивості → Рівні).";
   }, 100);
 }
 
@@ -397,6 +405,7 @@ function renderSettings(el) {
         <button class="preview-btn" id="micTestBtn">Перевірити</button>
         <div class="level"><div class="level-fill" id="levelFill"></div><div class="level-thresh"></div></div>
       </div>
+      <div class="setting-hint" id="micHint" style="margin-top:8px"></div>
     </div>
     <div class="card">
       <div class="section-title" style="margin-bottom:6px">Модель розпізнавання</div>

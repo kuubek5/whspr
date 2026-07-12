@@ -534,19 +534,30 @@ def load_model(name: str = MODEL_NAME) -> WhisperModel:
         return _load_model_locked(name)
 
 
+def _build_model(name: str, device: str, compute_type: str) -> WhisperModel:
+    # If the model is already cached, load it offline — otherwise faster-whisper
+    # does an HF revision check that can hang for a long time on a slow/blocked
+    # network (e.g. behind a VPN), which looked like an endless "loading model".
+    try:
+        return WhisperModel(name, device=device, compute_type=compute_type,
+                            local_files_only=True)
+    except Exception:
+        return WhisperModel(name, device=device, compute_type=compute_type)
+
+
 def _load_model_locked(name: str) -> WhisperModel:
     if name in state["models"]:
         return state["models"][name]
     if config.get("device") == "cpu":
-        m = WhisperModel(name, device="cpu", compute_type="int8")
+        m = _build_model(name, "cpu", "int8")
         log(f"model {name} on CPU (forced)")
     else:
         try:
-            m = WhisperModel(name, device="cuda", compute_type="int8_float16")
+            m = _build_model(name, "cuda", "int8_float16")
             log(f"model {name} on CUDA")
         except Exception as e:
             log(f"CUDA failed ({e.__class__.__name__}: {e}), falling back to CPU")
-            m = WhisperModel(name, device="cpu", compute_type="int8")
+            m = _build_model(name, "cpu", "int8")
             log(f"model {name} on CPU")
     t0 = time.time()
     list(m.transcribe(np.zeros(SAMPLE_RATE, dtype=np.float32), language="en")[0])
