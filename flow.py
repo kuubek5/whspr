@@ -16,14 +16,50 @@ import threading
 import collections
 import urllib.request
 
-# --- Make pip-installed CUDA DLLs (cuBLAS/cuDNN) visible to ctranslate2 ---
 BASE = os.path.dirname(os.path.abspath(__file__))
-venv_site = os.path.join(BASE, ".venv", "Lib", "site-packages")
-for sub in ("nvidia/cublas/bin", "nvidia/cudnn/bin"):
-    p = os.path.join(venv_site, *sub.split("/"))
-    if os.path.isdir(p):
-        os.add_dll_directory(p)
-        os.environ["PATH"] = p + os.pathsep + os.environ["PATH"]
+FROZEN = getattr(sys, "frozen", False)
+
+
+def _data_dir() -> str:
+    """Writable per-user location for config/db/log/models/cuda. When installed
+    to Program Files the app folder is read-only, so a frozen build stores its
+    data under %LOCALAPPDATA%\\whspr. From source, keep everything in the repo."""
+    d = os.path.join(os.environ.get("LOCALAPPDATA", BASE), "whspr") if FROZEN else BASE
+    try:
+        os.makedirs(d, exist_ok=True)
+    except OSError:
+        pass
+    return d
+
+
+DATA_DIR = _data_dir()
+# installed build: keep the HuggingFace model cache in our writable data dir
+# (set before faster_whisper is imported). From source, leave HF's default
+# (~/.cache/huggingface) so dev doesn't re-download gigabytes.
+if FROZEN:
+    os.environ.setdefault("HF_HOME", os.path.join(DATA_DIR, "models"))
+
+
+def register_cuda_dlls() -> bool:
+    """Expose cuBLAS/cuDNN to ctranslate2. Dev builds use the venv; installed
+    builds use the runtime-downloaded copy in <data>/cuda. Returns True if any
+    CUDA dir was found and registered."""
+    found = False
+    roots = [
+        os.path.join(BASE, ".venv", "Lib", "site-packages", "nvidia"),
+        os.path.join(DATA_DIR, "cuda", "nvidia"),
+    ]
+    for root in roots:
+        for sub in ("cublas/bin", "cudnn/bin"):
+            p = os.path.join(root, *sub.split("/"))
+            if os.path.isdir(p):
+                os.add_dll_directory(p)
+                os.environ["PATH"] = p + os.pathsep + os.environ["PATH"]
+                found = True
+    return found
+
+
+register_cuda_dlls()
 
 import ctypes
 import numpy as np
@@ -35,9 +71,9 @@ from faster_whisper import WhisperModel
 # ---------------- Config ----------------
 # Default Systran repo is 401 on HF now; deepdml is the working CT2 mirror.
 MODEL_NAME = "deepdml/faster-whisper-large-v3-turbo-ct2"
-CONFIG_PATH = os.path.join(BASE, "config.json")
-LOG_PATH = os.path.join(BASE, "whspr.log")
-DB_PATH = os.path.join(BASE, "history.db")
+CONFIG_PATH = os.path.join(DATA_DIR, "config.json")
+LOG_PATH = os.path.join(DATA_DIR, "whspr.log")
+DB_PATH = os.path.join(DATA_DIR, "history.db")
 LNK_NAME = "whspr.lnk"
 UK_MODELS = {
     "stock": MODEL_NAME,
@@ -231,7 +267,28 @@ def startup_dir() -> str:
 
 
 def set_autostart(enable: bool) -> None:
-    """Copy/remove the launcher .lnk in the user's Startup folder."""
+    """Toggle launch-at-login. Installed build uses the HKCU Run registry key
+    pointing at the exe; from source we copy the launcher .lnk into Startup."""
+    if FROZEN:
+        try:
+            import winreg
+            key = r"Software\Microsoft\Windows\CurrentVersion\Run"
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key, 0,
+                                winreg.KEY_SET_VALUE) as k:
+                if enable:
+                    winreg.SetValueEx(k, "whspr", 0, winreg.REG_SZ,
+                                      f'"{sys.executable}"')
+                    log("autostart enabled (registry)")
+                else:
+                    try:
+                        winreg.DeleteValue(k, "whspr")
+                        log("autostart disabled")
+                    except FileNotFoundError:
+                        pass
+        except OSError as e:
+            log(f"autostart failed: {e}")
+        return
+
     import shutil
     src = os.path.join(BASE, LNK_NAME)
     dst = os.path.join(startup_dir(), LNK_NAME)
@@ -817,6 +874,15 @@ def _start_core() -> None:
     """Audio stream, model warm-up, hotkey listener — shared by all modes."""
     def boot():
         try:
+            # installed build ships without CUDA libs — fetch them once if this
+            # machine has an NVIDIA GPU, then make them visible to ctranslate2
+            if FROZEN and config.get("device") != "cpu":
+                try:
+                    import cuda_setup
+                    if cuda_setup.ensure_cuda(DATA_DIR, log):
+                        register_cuda_dlls()
+                except Exception as e:
+                    log(f"cuda provisioning skipped ({e.__class__.__name__}: {e})")
             # warm the model for the CURRENT language, not just the default en
             # one — otherwise the first Ukrainian dictation eats a ~3s load
             state["model"] = model_for(LANGUAGES[state["lang"]])

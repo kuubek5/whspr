@@ -12,6 +12,11 @@ whspr.log
 # generated locally (absolute paths / machine-specific)
 whspr.lnk
 
+# build / installer output
+build/
+dist/
+packaging/Output/
+
 # scratch / test artifacts
 tts_test.wav
 uk_test_*.mp3

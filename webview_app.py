@@ -3,6 +3,7 @@
 # flow.py imports this lazily inside main() so there's no import cycle.
 
 import os
+import sys
 import json
 import subprocess
 import threading
@@ -10,7 +11,8 @@ import webview
 
 import flow
 
-BASE = os.path.dirname(os.path.abspath(__file__))
+# frozen (PyInstaller) builds unpack bundled data under sys._MEIPASS
+BASE = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
 WEB_DIR = os.path.join(BASE, "web")
 
 
