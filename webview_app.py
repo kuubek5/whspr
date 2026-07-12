@@ -37,6 +37,7 @@ class Api:
     def bootstrap(self):
         c = flow.config
         s = flow.history_stats()
+        rows = flow.history_last(200)  # single query; recent is a slice of it
         return {
             "theme": c.get("theme", "dark"),
             "gpu": self.gpu,
@@ -46,8 +47,11 @@ class Api:
                 "wordsToday": s["words_today"], "dictations": s["total"],
                 "wordsTotal": s["words"], "wpm": round(s["wpm"]),
             },
-            "recent": self._recent(4),
-            "history": self._history(200),
+            "recent": [{"time": self._pretty_time(ts), "text": text}
+                       for _id, ts, lang, dur, text in rows[:4]],
+            "history": [{"id": _id, "time": ts[11:16], "lang": lang,
+                         "duration": f"{dur:.1f}с", "text": text}
+                        for _id, ts, lang, dur, text in rows],
             "settings": {
                 "autostart": c.get("autostart", False),
                 "floatingPanel": c.get("overlay", True),
@@ -67,19 +71,6 @@ class Api:
                              for k, v in c.get("replacements", {}).items()],
             },
         }
-
-    def _recent(self, n):
-        rows = flow.history_last(n)
-        out = []
-        for _id, ts, lang, dur, text in rows:
-            out.append({"time": self._pretty_time(ts), "text": text})
-        return out
-
-    def _history(self, n):
-        rows = flow.history_last(n)
-        return [{"id": _id, "time": ts[11:16], "lang": lang,
-                 "duration": f"{dur:.1f}с", "text": text}
-                for _id, ts, lang, dur, text in rows]
 
     @staticmethod
     def _pretty_time(ts):

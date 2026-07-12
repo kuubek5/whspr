@@ -43,6 +43,7 @@ class StatusOverlay:
         self.canvas.pack()
         self._t0 = 0.0
         self._timer_job = None
+        self._last_geom = None
         self.win.withdraw()
 
     # ---- public, thread-safe ----
@@ -78,8 +79,13 @@ class StatusOverlay:
         x = self.PAD_L
         w = self.PAD_L + (self.DOT + self.GAP if dot else 0) + tw + self.PAD_R
         sw, sh = self.win.winfo_screenwidth(), self.win.winfo_screenheight()
-        self.win.geometry(f"{w}x{self.H}+{(sw - w) // 2}+{sh - self.H - self.MARGIN}")
-        self.canvas.config(width=w)
+        geom = f"{w}x{self.H}+{(sw - w) // 2}+{sh - self.H - self.MARGIN}"
+        # only touch the native window when its size/position actually changes
+        # (recording ticks every 0.5s but the width rarely moves)
+        if geom != self._last_geom:
+            self.win.geometry(geom)
+            self.canvas.config(width=w)
+            self._last_geom = geom
         self._pill(w)
         cy = self.H // 2
         if dot:

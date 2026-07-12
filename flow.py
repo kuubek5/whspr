@@ -393,7 +393,7 @@ def reload_models() -> None:
 
     def boot():
         try:
-            state["model"] = load_model()
+            state["model"] = model_for(LANGUAGES[state["lang"]])
             set_status("idle")
             log("model reloaded on " + config.get("device", "cuda"))
         except Exception as e:
@@ -817,7 +817,9 @@ def _start_core() -> None:
     """Audio stream, model warm-up, hotkey listener — shared by all modes."""
     def boot():
         try:
-            state["model"] = load_model()
+            # warm the model for the CURRENT language, not just the default en
+            # one — otherwise the first Ukrainian dictation eats a ~3s load
+            state["model"] = model_for(LANGUAGES[state["lang"]])
             set_status("idle")
             log(f"ready. hold {hotkey_label(config['hotkey'])} = dictate "
                 f"({LANGUAGES[state['lang']]})")
