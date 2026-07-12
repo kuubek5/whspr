@@ -50,9 +50,16 @@ DEFAULTS = {
     "theme": "dark",          # web UI theme: dark | light
     # which model handles Ukrainian: "stock" or "uk-ft" (fine-tune, downloaded)
     "model_uk": "stock",
+    # compute device: "cuda" (GPU, fast) or "cpu" (fallback, slow)
+    "device": "cuda",
     "rms_threshold": 0.003,
     "beam_size": 5,
     "overlay": True,
+    # mic input device name; "" = system default
+    "input_device": "",
+    # open the mic only while recording (removes the always-on tray mic
+    # indicator, at the cost of pre-roll and a tiny start-up delay)
+    "mic_on_demand": False,
     # dictionary: comma/newline-separated terms fed to whisper as hotwords
     "dictionary": "",
     # voice commands replaced in the final text (case-insensitive)
@@ -308,10 +315,17 @@ def set_status(s: str) -> None:
         tray_icon.icon = tray_image(s)
         tray_icon.title = f"whspr: {s} [{LANGUAGES[state['lang']]}]"
     if overlay is not None and config.get("overlay", True):
-        if s == "recording":
-            overlay.recording()
-        elif s == "processing":
-            overlay.processing()
+        try:
+            if s == "recording":
+                overlay.recording()
+            elif s == "processing":
+                overlay.processing()
+            elif s == "loading":
+                overlay.loading()
+            elif s == "idle":
+                overlay.hide()
+        except Exception as e:
+            log(f"overlay update failed ({e.__class__.__name__}: {e})")
 
 
 def tray_image(status: str):
@@ -341,21 +355,52 @@ def start_tray(on_open, on_quit) -> None:
 
 
 # ---------------- Model ----------------
+_model_lock = threading.Lock()
+
+
 def load_model(name: str = MODEL_NAME) -> WhisperModel:
+    with _model_lock:
+        return _load_model_locked(name)
+
+
+def _load_model_locked(name: str) -> WhisperModel:
     if name in state["models"]:
         return state["models"][name]
-    try:
-        m = WhisperModel(name, device="cuda", compute_type="int8_float16")
-        log(f"model {name} on CUDA")
-    except Exception as e:
-        log(f"CUDA failed ({e.__class__.__name__}: {e}), falling back to CPU")
+    if config.get("device") == "cpu":
         m = WhisperModel(name, device="cpu", compute_type="int8")
-        log(f"model {name} on CPU")
+        log(f"model {name} on CPU (forced)")
+    else:
+        try:
+            m = WhisperModel(name, device="cuda", compute_type="int8_float16")
+            log(f"model {name} on CUDA")
+        except Exception as e:
+            log(f"CUDA failed ({e.__class__.__name__}: {e}), falling back to CPU")
+            m = WhisperModel(name, device="cpu", compute_type="int8")
+            log(f"model {name} on CPU")
     t0 = time.time()
     list(m.transcribe(np.zeros(SAMPLE_RATE, dtype=np.float32), language="en")[0])
     log(f"warm-up done ({time.time() - t0:.1f}s)")
     state["models"][name] = m
     return m
+
+
+def reload_models() -> None:
+    """Drop cached models and re-warm the default on the new compute device."""
+    set_status("loading")
+    with _model_lock:
+        state["models"].clear()
+        state["model"] = None
+
+    def boot():
+        try:
+            state["model"] = load_model()
+            set_status("idle")
+            log("model reloaded on " + config.get("device", "cuda"))
+        except Exception as e:
+            log(f"model reload failed ({e.__class__.__name__}: {e})")
+            set_status("idle")
+
+    threading.Thread(target=boot, daemon=True).start()
 
 
 def model_for(lang: str) -> WhisperModel:
@@ -381,6 +426,64 @@ def audio_callback(indata, frames, t, status):
         chunks.append(indata.copy())
     else:
         pre_roll.append(indata.copy())
+
+
+def _make_stream(device):
+    return sd.InputStream(
+        samplerate=SAMPLE_RATE, channels=1, dtype="float32",
+        blocksize=BLOCK, callback=audio_callback, device=device,
+    )
+
+
+def open_input_stream():
+    """Open the mic stream on the configured device, falling back to the system
+    default. Never raises: returns None if no input device is usable, so a
+    missing/unplugged mic degrades to 'dictation disabled' instead of a crash."""
+    dev = config.get("input_device") or None
+    for target in (dev, None) if dev is not None else (None,):
+        try:
+            s = _make_stream(target)
+            s.start()
+            name = sd.query_devices(target)["name"] if target is not None else "system default"
+            log(f"input device: {name}")
+            return s
+        except Exception as e:
+            log(f"input device {target!r} failed ({e.__class__.__name__}: {e})")
+    log("no usable input device — dictation disabled until one is connected")
+    return None
+
+
+def close_stream() -> None:
+    old = state.get("stream")
+    if old is not None:
+        try:
+            old.stop()
+            old.close()
+        except Exception:
+            pass
+    state["stream"] = None
+
+
+def restart_stream() -> None:
+    """Reopen the mic stream after a device / mic-mode change. In on-demand mode
+    the stream stays closed until the next recording."""
+    close_stream()
+    if not config.get("mic_on_demand"):
+        state["stream"] = open_input_stream()
+
+
+def list_input_devices() -> list[dict]:
+    """Unique input-capable devices for the settings picker."""
+    out, seen = [], set()
+    try:
+        for d in sd.query_devices():
+            name = d.get("name", "")
+            if d.get("max_input_channels", 0) > 0 and name and name not in seen:
+                seen.add(name)
+                out.append({"name": name})
+    except Exception as e:
+        log(f"device enumeration failed: {e}")
+    return out
 
 
 # ---------------- Paste ----------------
@@ -435,6 +538,7 @@ def transcribe_and_paste(target_hwnd: int) -> None:
         # cheap silence gate instead of Silero VAD: onnxruntime import hangs
         # for minutes on this machine, and push-to-talk audio has speech anyway
         rms = float(np.sqrt(np.mean(audio**2)))
+        log(f"level rms={rms:.4f} (threshold {config['rms_threshold']})")
         if rms < config["rms_threshold"]:
             log(f"skipped: too quiet (rms={rms:.4f})")
             done_msg, ok = "тиша", False
@@ -475,10 +579,13 @@ def transcribe_and_paste(target_hwnd: int) -> None:
     finally:
         set_status("idle")
         if overlay is not None and config.get("overlay", True):
-            if done_msg is not None:
-                overlay.flash(done_msg, ok)
-            else:
-                overlay.hide()
+            try:
+                if done_msg is not None:
+                    overlay.flash(done_msg, ok)
+                else:
+                    overlay.hide()
+            except Exception as e:
+                log(f"overlay flash failed ({e.__class__.__name__}: {e})")
 
 
 # ---------------- Hotkeys ----------------
@@ -541,6 +648,11 @@ def start_listener() -> keyboard.Listener:
         if state["model"] is None:
             log("model still loading, try again in a moment")
             return
+        if config.get("mic_on_demand") and state.get("stream") is None:
+            state["stream"] = open_input_stream()
+            if state["stream"] is None:
+                log("cannot record: no input device")
+                return
         chunks.clear()
         state["recording"] = True
         set_status("recording")
@@ -550,6 +662,8 @@ def start_listener() -> keyboard.Listener:
         state["recording"] = False
         hwnd = user32.GetForegroundWindow()
         threading.Thread(target=transcribe_and_paste, args=(hwnd,), daemon=True).start()
+        if config.get("mic_on_demand"):
+            close_stream()
 
     def on_press(key):
         tok = canon(key)
@@ -673,21 +787,47 @@ def quit_app():
     os._exit(0)
 
 
+def _start_overlay() -> None:
+    """Run the Tkinter status pill in its own thread with its own Tk loop.
+
+    Kept separate from pywebview's main loop; all pill updates are marshalled
+    onto this thread via root.after() (see StatusOverlay). Used in web mode,
+    where the main window is pywebview but the overlay needs Tk transparency."""
+    if not config.get("overlay", True):
+        return
+
+    def run():
+        global overlay
+        try:
+            import tkinter as tk
+            from ui import StatusOverlay
+            root = tk.Tk()
+            root.withdraw()
+            overlay = StatusOverlay(root)
+            set_status(state["status"])  # reflect current state (e.g. loading)
+            root.mainloop()
+        except Exception as e:
+            overlay = None
+            log(f"overlay unavailable ({e.__class__.__name__}: {e}) — running without pill")
+
+    threading.Thread(target=run, daemon=True).start()
+
+
 def _start_core() -> None:
     """Audio stream, model warm-up, hotkey listener — shared by all modes."""
     def boot():
-        state["model"] = load_model()
-        set_status("idle")
-        log(f"ready. hold {hotkey_label(config['hotkey'])} = dictate "
-            f"({LANGUAGES[state['lang']]})")
+        try:
+            state["model"] = load_model()
+            set_status("idle")
+            log(f"ready. hold {hotkey_label(config['hotkey'])} = dictate "
+                f"({LANGUAGES[state['lang']]})")
+        except Exception as e:
+            log(f"model load failed ({e.__class__.__name__}: {e}) — "
+                f"dictation unavailable")
+            set_status("idle")
 
     threading.Thread(target=boot, daemon=True).start()
-    stream = sd.InputStream(
-        samplerate=SAMPLE_RATE, channels=1, dtype="float32",
-        blocksize=BLOCK, callback=audio_callback,
-    )
-    stream.start()
-    state["stream"] = stream
+    state["stream"] = None if config.get("mic_on_demand") else open_input_stream()
     restart_listener()
 
 
@@ -712,6 +852,7 @@ def main() -> None:
                 except Exception:
                     pass
         start_tray(on_open=on_open, on_quit=quit_app)
+        _start_overlay()
         _start_core()
         webview_app.run()  # blocks until window closed
         # closing the window quits the app (tray also offers Quit)

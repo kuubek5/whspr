@@ -11,7 +11,9 @@ const state = {
   stats: { wordsToday: 0, dictations: 0, wordsTotal: 0, wpm: 0 },
   recent: [], history: [],
   settings: { autostart: true, floatingPanel: true, sound: false, autoLang: true,
-              model: "uk-ft", gpuDevice: "RTX 4070", backupKeyVisible: false, backupKey: "" },
+              model: "uk-ft", gpuDevice: "RTX 4070", device: "cuda", inputDevice: "", micOnDemand: false,
+              backupKeyVisible: false, backupKey: "" },
+  devices: [],
   dictionary: { hotwords: "", commands: [] },
 };
 
@@ -41,6 +43,8 @@ function mock(method, args) {
       { id: 1, time: "11:48", lang: "uk", duration: "1.9с", text: "потрібно оновити прошивку квадрокоптера" },
     ],
     settings: state.settings,
+    devices: [{ name: "Мікрофон (Realtek Audio)" }, { name: "Вхід (XONAR SOUND CARD)" },
+              { name: "OnePlus 9R Hands-Free" }],
     dictionary: {
       hotwords: "Klipper, PID, sinter, FPV, Proxmox, homelab, Vaultwarden",
       commands: [
@@ -62,6 +66,7 @@ async function boot() {
   state.hotkey = b.hotkey || "Fn";
   state.stats = b.stats; state.recent = b.recent; state.history = b.history;
   state.settings = Object.assign(state.settings, b.settings || {});
+  state.devices = b.devices || [];
   state.dictionary = b.dictionary; state.homeState = b.status || "idle";
   applyTheme(); document.getElementById("gpuBadge").textContent = "Локально · " + state.gpu;
   render(); pollStatus();
@@ -100,8 +105,8 @@ function render() {
   body.innerHTML = "";
   const page = document.createElement("div");
   page.className = "page";
-  ({ home: renderHome, history: renderHistory, dictionary: renderDictionary, settings: renderSettings }[state.page])(page);
   body.appendChild(page);
+  ({ home: renderHome, history: renderHistory, dictionary: renderDictionary, settings: renderSettings }[state.page])(page);
 }
 const esc = (s) => (s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 
@@ -122,7 +127,7 @@ function renderHome(el) {
       ${statTile("Слів усього", "wordsTotal")}
       ${statTile("Слів/хв", "wpm")}
     </div>
-    <div class="card">
+    <div class="card feed-card">
       <div class="feed-header">Останні диктовки</div>
       ${state.recent.map((r) => `<div class="feed-row"><div class="feed-time mono">${esc(r.time)}</div><div class="feed-text mono">${esc(r.text)}</div></div>`).join("")}
     </div>`;
@@ -277,6 +282,14 @@ function renderSettings(el) {
       </div>
     </div>
     <div class="card">
+      <div class="section-title" style="margin-bottom:6px">Мікрофон</div>
+      <div class="setting-row">
+        <div><div class="setting-label">Пристрій вводу</div><div class="setting-hint">Джерело звуку для диктування</div></div>
+        <select class="select" id="selMic"></select>
+      </div>
+      ${toggleRow("Відкривати мікрофон лише під час запису", "Прибирає значок мікрофона в треї; можливе зрізання перших мілісекунд фрази", "micOnDemand", true)}
+    </div>
+    <div class="card">
       <div class="section-title" style="margin-bottom:6px">Модель розпізнавання</div>
       <div class="setting-row">
         <div><div class="setting-label">Модель для української</div><div class="setting-hint">uk-ft — донавчена на розмовній українській</div></div>
@@ -286,9 +299,10 @@ function renderSettings(el) {
         </select>
       </div>
       <div class="setting-row" style="border:none">
-        <div><div class="setting-label">Пристрій обробки</div><div class="setting-hint">Вся обробка виконується локально на цьому пристрої</div></div>
+        <div><div class="setting-label">Пристрій обробки</div><div class="setting-hint">Де рахувати модель: GPU швидко, CPU повільний запасний. Уся обробка локально</div></div>
         <select class="select" id="selGpu">
-          <option>RTX 4070</option><option>RTX 4090</option><option value="CPU">CPU (запасний варіант)</option>
+          <option value="cuda">${esc(state.gpu)} (GPU)</option>
+          <option value="cpu">CPU (запасний варіант)</option>
         </select>
       </div>
     </div>
@@ -307,7 +321,12 @@ function renderSettings(el) {
     const k = t.dataset.key; s[k] = !s[k]; t.classList.toggle("on", s[k]); saveSettings();
   });
   const selM = el.querySelector("#selModel"); selM.value = s.model; selM.onchange = () => { s.model = selM.value; saveSettings(); };
-  const selG = el.querySelector("#selGpu"); selG.value = s.gpuDevice; selG.onchange = () => { s.gpuDevice = selG.value; saveSettings(); };
+  const selG = el.querySelector("#selGpu"); selG.value = s.device || "cuda"; selG.onchange = () => { s.device = selG.value; saveSettings(); };
+  const selMic = el.querySelector("#selMic");
+  selMic.innerHTML = `<option value="">Системний за замовчуванням</option>` +
+    state.devices.map((d) => `<option value="${esc(d.name)}">${esc(d.name)}</option>`).join("");
+  selMic.value = s.inputDevice || "";
+  selMic.onchange = () => { s.inputDevice = selMic.value; saveSettings(); };
   el.querySelector("#hotkeyBtn").onclick = captureHotkey;
   const eye = el.querySelector("#keyEye"); setEye(eye);
   eye.onclick = () => { s.backupKeyVisible = !s.backupKeyVisible;

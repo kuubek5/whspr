@@ -55,8 +55,12 @@ class Api:
                 "autoLang": c.get("auto_lang", False),
                 "model": c.get("model_uk", "stock"),
                 "gpuDevice": self.gpu,
+                "device": c.get("device", "cuda"),
+                "inputDevice": c.get("input_device", ""),
+                "micOnDemand": c.get("mic_on_demand", False),
                 "backupKey": "", "backupKeyVisible": False,
             },
+            "devices": flow.list_input_devices(),
             "dictionary": {
                 "hotwords": c.get("dictionary", ""),
                 "commands": [{"phrase": k, "result": v}
@@ -111,14 +115,28 @@ class Api:
     # ---- settings ----
     def save_settings(self, s):
         c = flow.config
+        old_dev = c.get("input_device", "")
+        old_mode = c.get("mic_on_demand", False)
+        old_device = c.get("device", "cuda")
+        old_model = c.get("model_uk", "stock")
         c["autostart"] = bool(s.get("autostart"))
         c["overlay"] = bool(s.get("floatingPanel"))
         c["sound"] = bool(s.get("sound"))
         c["auto_lang"] = bool(s.get("autoLang"))
         c["model_uk"] = s.get("model", "stock")
+        c["device"] = "cpu" if s.get("device") == "cpu" else "cuda"
+        c["input_device"] = s.get("inputDevice", "") or ""
+        c["mic_on_demand"] = bool(s.get("micOnDemand"))
         flow.save_config(c)
         flow.set_autostart(c["autostart"])
+        if c["input_device"] != old_dev or c["mic_on_demand"] != old_mode:
+            flow.restart_stream()
+        if c["device"] != old_device or c["model_uk"] != old_model:
+            flow.reload_models()
         return True
+
+    def list_devices(self):
+        return flow.list_input_devices()
 
     def save_dictionary(self, hotwords, commands):
         c = flow.config
@@ -172,23 +190,8 @@ def run() -> None:
     )
     flow.state["webview_window"] = window
 
-    # floating pill — a separate frameless, always-on-top capsule near the
-    # bottom-center of the primary screen (the signature overlay)
-    if flow.config.get("overlay", True):
-        pw, ph = 360, 60
-        try:
-            screen = webview.screens[0]
-            px = (screen.width - pw) // 2
-            py = screen.height - ph - 70
-        except Exception:
-            px, py = 700, 900
-        pill = webview.create_window(
-            "whspr-pill", os.path.join(WEB_DIR, "pill.html"),
-            js_api=api, width=pw, height=ph, x=px, y=py,
-            frameless=True, easy_drag=False, on_top=True,
-            transparent=True, background_color="#0E0E12",
-            focus=False,
-        )
-        flow.state["pill_window"] = pill
+    # The floating status pill lives in a Tkinter overlay (flow._start_overlay),
+    # not a pywebview window: WebView2 on Windows can't render a transparent,
+    # rounded, always-on-top capsule, so Tk with -transparentcolor handles it.
 
     webview.start()
