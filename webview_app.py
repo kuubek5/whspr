@@ -213,6 +213,20 @@ def run() -> None:
     )
     flow.state["webview_window"] = window
 
+    # Closing the window hides it to the tray instead of quitting — dictation
+    # keeps working in the background. Quit via the tray menu ("Вихід").
+    def _on_closing():
+        try:
+            window.hide()
+        except Exception:
+            pass
+        return False  # cancel the real close
+
+    try:
+        window.events.closing += _on_closing
+    except Exception:
+        pass
+
     # The floating status pill lives in a Tkinter overlay (flow._start_overlay),
     # not a pywebview window: WebView2 on Windows can't render a transparent,
     # rounded, always-on-top capsule, so Tk with -transparentcolor handles it.

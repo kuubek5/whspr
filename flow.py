@@ -19,6 +19,13 @@ import urllib.request
 BASE = os.path.dirname(os.path.abspath(__file__))
 FROZEN = getattr(sys, "frozen", False)
 
+# Launched as `python flow.py`, this module is "__main__". Register it as "flow"
+# as well so that webview_app's `import flow` reuses THIS instance (with the live
+# audio/model/status state) instead of creating a SECOND flow module whose state
+# never leaves "loading" — which made the UI hang on "Завантаження моделі…".
+if __name__ == "__main__":
+    sys.modules.setdefault("flow", sys.modules["__main__"])
+
 
 def _data_dir() -> str:
     """Writable per-user location for config/db/log/models/cuda. When installed
