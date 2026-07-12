@@ -48,6 +48,39 @@ Or run `packaging\build.ps1` which does both.
 - WebView2 runtime is required; it is preinstalled on current Windows 10/11.
   If missing, install the Evergreen runtime from Microsoft.
 
+## Licensing (offline monthly keys)
+
+whspr uses offline Ed25519-signed license keys. The app ships only the public
+key (`licensing.py`); keys can be issued solely with your private key.
+
+**One-time setup** (already done if `keys\whspr_ed25519.pem` exists):
+```
+python make_license.py genkey
+```
+This writes the private key to `keys\whspr_ed25519.pem` and prints the public
+key to embed in `licensing.py` (`LICENSE_PUBKEY_HEX`).
+
+> ⚠️ **Back up `keys\whspr_ed25519.pem` somewhere safe and never commit it.**
+> It is git-ignored. If you lose it you cannot issue keys that match the public
+> key already shipped in the app, and every installed copy would need a rebuild
+> with a new key.
+
+**Issue a monthly key for a buyer:**
+```
+python make_license.py issue --days 30 --id "buyer@example.com"
+```
+Send the printed key string to the customer. They paste it into
+**Settings → Ліцензія → Активувати**. Dictation is locked until a valid,
+unexpired key is entered; after expiry the app asks for a new one.
+
+Notes:
+- Clock-rollback is guarded (a stored last-seen date), so winding the system
+  clock back does not revive an expired key.
+- This is client-side DRM — it deters casual sharing and enforces the window,
+  but is not tamper-proof against a determined attacker with the binary.
+- Keys are **not** bound to a machine in this build (a key works on any PC).
+  Add hardware binding later if needed.
+
 ## Known items to validate on a clean PC
 
 - GPU path: ctranslate2 bundles a `cudnn64_9.dll`; the runtime download also

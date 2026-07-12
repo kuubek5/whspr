@@ -6,6 +6,8 @@ numpy
 pystray>=0.19
 pillow
 pywebview>=6.0
+# Ed25519 signing/verification for offline license keys
+cryptography>=42.0
 # customtkinter powers the older --classic UI; the default UI is pywebview (web/)
 customtkinter>=6.0
 # CUDA runtime for ctranslate2 (no system CUDA toolkit needed)

@@ -7,7 +7,8 @@ const MOON = '<path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z"></path>';
 
 const state = {
   theme: "dark", page: "home", homeState: "idle", recordSecs: 0,
-  gpu: "…", hotkey: "Fn", listening: false,
+  gpu: "…", hotkey: "Fn", listening: false, version: "", update: { available: false },
+  license: { licensed: true, daysLeft: 0, exp: "", reason: "ok", customer: "" },
   stats: { wordsToday: 0, dictations: 0, wordsTotal: 0, wpm: 0 },
   recent: [], history: [],
   settings: { autostart: true, floatingPanel: true, sound: false, autoLang: true,
@@ -28,7 +29,8 @@ async function api(method, ...args) {
 }
 function mock(method, args) {
   if (method === "bootstrap") return {
-    theme: "dark", gpu: "RTX 3070", hotkey: "Fn",
+    theme: "dark", gpu: "RTX 3070", hotkey: "Fn", version: "1.0.0",
+    license: { licensed: true, daysLeft: 23, exp: "2026-08-04", reason: "ok", customer: "demo@buyer" },
     status: "idle",
     stats: { wordsToday: 2481, dictations: 37, wordsTotal: 184920, wpm: 132 },
     recent: [
@@ -55,6 +57,12 @@ function mock(method, args) {
     },
   };
   if (method === "get_status") return state.homeState;
+  if (method === "get_download") return { active: false };
+  if (method === "get_input_level") return 0.02 + Math.random() * 0.06;
+  if (method === "mic_test") return true;
+  if (method === "check_update") return { available: false, version: "", url: "" };
+  if (method === "get_license") return state.license;
+  if (method === "activate_license") return { ok: true, licensed: true, daysLeft: 30, exp: "2026-08-11", reason: "ok" };
   return null;
 }
 
@@ -64,12 +72,65 @@ async function boot() {
   state.theme = b.theme || "dark";
   state.gpu = b.gpu || "GPU";
   state.hotkey = b.hotkey || "Fn";
+  state.version = b.version || "";
+  state.license = b.license || state.license;
   state.stats = b.stats; state.recent = b.recent; state.history = b.history;
   state.settings = Object.assign(state.settings, b.settings || {});
   state.devices = b.devices || [];
   state.dictionary = b.dictionary; state.homeState = b.status || "idle";
   applyTheme(); document.getElementById("gpuBadge").textContent = "Локально · " + state.gpu;
-  render(); pollStatus();
+  render(); pollStatus(); pollDownload(); checkUpdate();
+}
+
+// ---- download progress ----
+async function pollDownload() {
+  setInterval(async () => {
+    const box = document.getElementById("dlProgress");
+    if (!box) return;
+    const d = await api("get_download");
+    if (d && d.active) {
+      const bar = box.querySelector(".dl-fill");
+      const txt = box.querySelector(".dl-text");
+      if (d.pct != null) { bar.classList.remove("indet"); bar.style.width = d.pct + "%"; }
+      else bar.classList.add("indet");
+      const size = d.totalMb ? `${d.mb} / ${d.totalMb} МБ` : (d.mb ? `${d.mb} МБ` : "");
+      txt.textContent = [d.label, size].filter(Boolean).join(" · ");
+      box.style.display = "block";
+    } else box.style.display = "none";
+  }, 500);
+}
+
+// ---- mic test / level meter ----
+let micTestTimer = null;
+function stopMicTest() {
+  if (!micTestTimer) return;
+  clearInterval(micTestTimer); micTestTimer = null;
+  api("mic_test", false);
+}
+async function toggleMicTest(btn) {
+  if (micTestTimer) {
+    stopMicTest(); btn.textContent = "Перевірити"; btn.classList.remove("active");
+    const f = document.getElementById("levelFill"); if (f) f.style.width = "0";
+    return;
+  }
+  await api("mic_test", true);
+  btn.textContent = "Стоп"; btn.classList.add("active");
+  micTestTimer = setInterval(async () => {
+    const lvl = await api("get_input_level");
+    const f = document.getElementById("levelFill");
+    if (f) f.style.width = Math.min(100, (lvl / 0.1) * 100) + "%";
+  }, 100);
+}
+
+// ---- update check ----
+async function checkUpdate() {
+  const u = await api("check_update");
+  state.update = u || { available: false };
+  if (state.update.available && state.page === "home") render();
+}
+async function doInstallUpdate() {
+  if (!confirm(`Оновити whspr до версії ${state.update.version}? Застосунок перезапуститься.`)) return;
+  await api("install_update", state.update.url);
 }
 window.addEventListener("pywebviewready", boot);
 document.addEventListener("DOMContentLoaded", () => { if (!hasApi()) boot(); });
@@ -100,6 +161,7 @@ nav.querySelectorAll(".nav-item").forEach((btn) => {
 
 // ---- render dispatch ----
 function render() {
+  stopMicTest();
   moveIndicator();
   const body = document.getElementById("body");
   body.innerHTML = "";
@@ -113,6 +175,10 @@ const esc = (s) => (s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&l
 // ---- HOME ----
 function renderHome(el) {
   el.innerHTML = `
+    ${state.update.available ? `<div class="update-banner">
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"></path><polyline points="21 3 21 9 15 9"></polyline></svg>
+      Доступне оновлення v${esc(state.update.version)}
+      <button class="u-btn" id="updBtn">Оновити</button></div>` : ""}
     <div class="hero">
       <div class="hero-center" id="heroCenter"></div>
       <div class="preview-row">
@@ -138,18 +204,30 @@ function renderHome(el) {
   });
   renderHero(); countUpStats();
   el.querySelectorAll(".preview-btn").forEach((b) => b.classList.toggle("active", b.dataset.s === state.homeState));
+  const ub = el.querySelector("#updBtn");
+  if (ub) ub.onclick = doInstallUpdate;
 }
 function statTile(label, key) {
   return `<div class="stat-tile"><div class="stat-label">${label}</div><div class="stat-value mono" data-stat="${key}">0</div></div>`;
 }
+const isLicensed = () => state.license && state.license.licensed;
+
 function renderHero() {
   const h = document.getElementById("heroCenter");
   if (!h) return;
+  if (!isLicensed()) {
+    const expired = state.license && state.license.reason === "expired";
+    h.innerHTML = `<div class="hero-mic"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg></div>
+      <div class="hero-title">${expired ? "Ліцензію прострочено" : "Ліцензія неактивна"}</div>
+      <div class="hero-sub">Введіть ключ у Налаштуваннях → Ліцензія</div>`;
+    return;
+  }
   if (state.homeState === "loading") {
     h.innerHTML = `<div class="idle-dot"></div>
       <div class="hero-mic"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path><path d="M19 10v1a7 7 0 0 1-14 0v-1"></path><line x1="12" y1="18" x2="12" y2="22"></line><line x1="8" y1="22" x2="16" y2="22"></line></svg></div>
       <div class="hero-title">Завантаження моделі…</div>
-      <div class="hero-sub">за мить усе буде готово</div>`;
+      <div class="hero-sub">за мить усе буде готово</div>
+      <div class="dl-wrap" id="dlProgress" style="display:none"><div class="dl-bar"><div class="dl-fill indet"></div></div><div class="dl-text"></div></div>`;
   } else if (state.homeState === "idle") {
     h.innerHTML = `<div class="idle-dot"></div>
       <div class="hero-mic"><svg viewBox="0 0 24 24" width="30" height="30" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path><path d="M19 10v1a7 7 0 0 1-14 0v-1"></path><line x1="12" y1="18" x2="12" y2="22"></line><line x1="8" y1="22" x2="16" y2="22"></line></svg></div>
@@ -272,9 +350,28 @@ function renderCmds() {
 }
 
 // ---- SETTINGS ----
+function licenseStatusHtml() {
+  const l = state.license || {};
+  if (l.licensed) {
+    return `<div class="privacy-note">Активна · залишилось ${l.daysLeft} дн. · до ${esc(l.exp)}${l.customer ? " · " + esc(l.customer) : ""}</div>`;
+  }
+  const msg = l.reason === "expired"
+    ? `Прострочено${l.exp ? " (" + esc(l.exp) + ")" : ""} — введіть новий ключ`
+    : "Не активована — введіть ключ";
+  return `<div class="setting-hint" style="color:var(--accent);font-size:12.5px">${msg}</div>`;
+}
 function renderSettings(el) {
   const s = state.settings;
   el.innerHTML = `
+    <div class="card">
+      <div class="section-title" style="margin-bottom:6px">Ліцензія</div>
+      ${licenseStatusHtml()}
+      <div class="key-wrap" style="margin-top:12px">
+        <input class="cmd-input mono" id="licKey" placeholder="Вставте ключ ліцензії" style="flex:1">
+        <button class="add-btn" id="licActivate">Активувати</button>
+      </div>
+      <div id="licError" style="color:var(--accent);font-size:12px;margin-top:8px"></div>
+    </div>
     <div class="card">
       <div class="section-title" style="margin-bottom:6px">Загальні</div>
       ${toggleRow("Запускати з Windows", "Автоматично запускати whspr при вході в систему", "autostart")}
@@ -296,6 +393,10 @@ function renderSettings(el) {
         <select class="select" id="selMic"></select>
       </div>
       ${toggleRow("Відкривати мікрофон лише під час запису", "Прибирає значок мікрофона в треї; можливе зрізання перших мілісекунд фрази", "micOnDemand", true)}
+      <div class="mic-test">
+        <button class="preview-btn" id="micTestBtn">Перевірити</button>
+        <div class="level"><div class="level-fill" id="levelFill"></div><div class="level-thresh"></div></div>
+      </div>
     </div>
     <div class="card">
       <div class="section-title" style="margin-bottom:6px">Модель розпізнавання</div>
@@ -335,6 +436,18 @@ function renderSettings(el) {
     state.devices.map((d) => `<option value="${esc(d.name)}">${esc(d.name)}</option>`).join("");
   selMic.value = s.inputDevice || "";
   selMic.onchange = () => { s.inputDevice = selMic.value; saveSettings(); };
+  el.querySelector("#micTestBtn").onclick = (e) => toggleMicTest(e.currentTarget);
+  el.querySelector("#licActivate").onclick = async () => {
+    const key = el.querySelector("#licKey").value.trim();
+    const err = el.querySelector("#licError");
+    if (!key) return;
+    const res = await api("activate_license", key);
+    if (res && res.ok) {
+      state.license = { licensed: true, daysLeft: res.daysLeft, exp: res.exp,
+                        reason: "ok", customer: res.customer || "" };
+      render();
+    } else err.textContent = (res && res.error) || "Помилка активації";
+  };
   el.querySelector("#hotkeyBtn").onclick = captureHotkey;
   const eye = el.querySelector("#keyEye"); setEye(eye);
   eye.onclick = () => { s.backupKeyVisible = !s.backupKeyVisible;

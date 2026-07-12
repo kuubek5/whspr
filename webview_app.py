@@ -42,6 +42,8 @@ class Api:
         rows = flow.history_last(200)  # single query; recent is a slice of it
         return {
             "theme": c.get("theme", "dark"),
+            "version": flow.APP_VERSION,
+            "license": flow.license_status(),
             "gpu": self.gpu,
             "hotkey": flow.hotkey_label(c.get("hotkey", "f9")),
             "status": flow.state["status"],
@@ -85,6 +87,34 @@ class Api:
     # ---- live ----
     def get_status(self):
         return flow.state["status"]
+
+    def get_download(self):
+        return flow.state.get("download", {"active": False})
+
+    def get_input_level(self):
+        return flow.state.get("input_level", 0.0)
+
+    def mic_test(self, on):
+        return flow.mic_test(bool(on))
+
+    def get_license(self):
+        return flow.license_status()
+
+    def activate_license(self, key):
+        return flow.activate_license(key or "")
+
+    def check_update(self):
+        return flow.check_update()
+
+    def install_update(self, url):
+        ok = flow.download_update(url)
+        if ok:
+            def bye():
+                import time
+                time.sleep(1.5)
+                flow.quit_app()
+            threading.Thread(target=bye, daemon=True).start()
+        return ok
 
     def get_pill(self):
         import time

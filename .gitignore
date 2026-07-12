@@ -9,6 +9,11 @@ history.db
 whspr.log
 *.log
 
+# licensing — private signing key + issued/installed licenses. NEVER commit.
+keys/
+license.key
+.lastseen
+
 # generated locally (absolute paths / machine-specific)
 whspr.lnk
 

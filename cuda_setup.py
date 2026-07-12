@@ -44,7 +44,7 @@ def _wheel_url(pkg: str, version):
     raise RuntimeError(f"no win_amd64 wheel for {pkg}")
 
 
-def _download(url: str, log) -> str:
+def _download(url: str, log, progress=None) -> str:
     fd, tmp = tempfile.mkstemp(suffix=".whl")
     os.close(fd)
     with urllib.request.urlopen(url, timeout=900) as r:
@@ -57,6 +57,11 @@ def _download(url: str, log) -> str:
                     break
                 f.write(chunk)
                 done += len(chunk)
+                if progress:
+                    try:
+                        progress(done, total)
+                    except Exception:
+                        pass
                 if total and done - mark >= (50 << 20):  # log every ~50 MB
                     mark = done
                     log(f"  {done >> 20}/{total >> 20} MB")
@@ -69,9 +74,10 @@ def is_ready(data_dir: str) -> bool:
             and os.path.isdir(os.path.join(root, "cudnn", "bin")))
 
 
-def ensure_cuda(data_dir: str, log=print) -> bool:
+def ensure_cuda(data_dir: str, log=print, progress=None) -> bool:
     """Download+extract cuBLAS/cuDNN into <data_dir>/cuda if missing and a GPU
-    is present. Returns True if the CUDA runtime is available afterwards."""
+    is present. Returns True if the CUDA runtime is available afterwards.
+    `progress(done_bytes, total_bytes)` is called during downloads."""
     if is_ready(data_dir):
         return True
     if not has_nvidia_gpu():
@@ -84,7 +90,7 @@ def ensure_cuda(data_dir: str, log=print) -> bool:
         try:
             url, fn = _wheel_url(pkg, ver)
             log(f"downloading {fn}")
-            tmp = _download(url, log)
+            tmp = _download(url, log, progress)
             log(f"extracting {fn}")
             with zipfile.ZipFile(tmp) as z:
                 for m in z.namelist():

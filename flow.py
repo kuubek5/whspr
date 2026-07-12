@@ -69,6 +69,8 @@ from pynput import keyboard
 from faster_whisper import WhisperModel
 
 # ---------------- Config ----------------
+APP_VERSION = "1.0.0"
+GITHUB_REPO = "kuubek5/whspr"  # for the update check
 # Default Systran repo is 401 on HF now; deepdml is the working CT2 mirror.
 MODEL_NAME = "deepdml/faster-whisper-large-v3-turbo-ct2"
 CONFIG_PATH = os.path.join(DATA_DIR, "config.json")
@@ -365,6 +367,118 @@ def apply_replacements(text: str) -> str:
     return text.strip()
 
 
+# ---------------- Download progress ----------------
+def set_download(active: bool, label: str = "", mb: int = 0,
+                 total_mb: int = 0) -> None:
+    pct = round(mb / total_mb * 100) if total_mb else None
+    state["download"] = {"active": active, "label": label,
+                         "mb": mb, "totalMb": total_mb, "pct": pct}
+
+
+def _dir_size_mb(path: str) -> int:
+    total = 0
+    for root, _dirs, files in os.walk(path):
+        for f in files:
+            try:
+                total += os.path.getsize(os.path.join(root, f))
+            except OSError:
+                pass
+    return total >> 20
+
+
+def _watch_model_download(label: str, stop: threading.Event) -> None:
+    """Report growth of the HF cache dir while a model downloads (its total is
+    unknown up front, so we show MB pulled)."""
+    cache = os.environ.get("HF_HOME") or os.path.join(
+        os.path.expanduser("~"), ".cache", "huggingface")
+    base = _dir_size_mb(cache)
+    while not stop.is_set():
+        grown = _dir_size_mb(cache) - base
+        if grown > 3:  # ignore tiny metadata churn
+            set_download(True, label, mb=grown)
+        stop.wait(0.6)
+
+
+# ---------------- Auto-update ----------------
+def _version_tuple(v: str):
+    return tuple(int(x) for x in re.findall(r"\d+", v or "0"))
+
+
+def check_update() -> dict:
+    """Query GitHub Releases for a newer version. Returns
+    {available, version, url} — never raises."""
+    try:
+        req = urllib.request.Request(
+            f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest",
+            headers={"Accept": "application/vnd.github+json",
+                     "User-Agent": "whspr"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            data = json.load(r)
+        tag = (data.get("tag_name") or "").lstrip("v")
+        asset = next((a["browser_download_url"] for a in data.get("assets", [])
+                      if a.get("name", "").endswith(".exe")), "")
+        newer = _version_tuple(tag) > _version_tuple(APP_VERSION)
+        return {"available": bool(newer and asset), "version": tag, "url": asset}
+    except Exception as e:
+        log(f"update check failed ({e.__class__.__name__}: {e})")
+        return {"available": False, "version": "", "url": ""}
+
+
+def download_update(url: str) -> bool:
+    """Download the installer to a temp file and launch it. The running app
+    should quit afterwards so the installer can replace its files."""
+    try:
+        import tempfile
+        fd, path = tempfile.mkstemp(suffix="-whspr-setup.exe")
+        os.close(fd)
+        with urllib.request.urlopen(url, timeout=900) as r:
+            total = int(r.headers.get("Content-Length", 0))
+            done = 0
+            with open(path, "wb") as f:
+                while True:
+                    c = r.read(1 << 20)
+                    if not c:
+                        break
+                    f.write(c)
+                    done += len(c)
+                    set_download(True, "Оновлення", mb=done >> 20,
+                                 total_mb=(total >> 20) if total else 0)
+        set_download(False)
+        os.startfile(path)  # noqa: launch the installer (Windows)
+        return True
+    except Exception as e:
+        log(f"update download failed ({e.__class__.__name__}: {e})")
+        set_download(False)
+        return False
+
+
+# ---------------- Licensing ----------------
+def license_status() -> dict:
+    try:
+        import licensing
+        state["license"] = licensing.status(DATA_DIR)
+    except Exception as e:
+        log(f"license check failed ({e.__class__.__name__}: {e})")
+        state["license"] = {"licensed": False, "reason": "error",
+                            "exp": "", "daysLeft": 0}
+    return state["license"]
+
+
+def activate_license(key: str) -> dict:
+    try:
+        import licensing
+        res = licensing.activate(DATA_DIR, key)
+    except Exception as e:
+        log(f"activation failed ({e.__class__.__name__}: {e})")
+        return {"ok": False, "error": "Помилка активації"}
+    license_status()
+    return res
+
+
+def is_licensed() -> bool:
+    return bool(state.get("license", {}).get("licensed"))
+
+
 # ---------------- UI plumbing ----------------
 def set_status(s: str) -> None:
     state["status"] = s
@@ -483,6 +597,25 @@ def audio_callback(indata, frames, t, status):
         chunks.append(indata.copy())
     else:
         pre_roll.append(indata.copy())
+    # cheap live input level for the mic meter / test
+    try:
+        state["input_level"] = float(np.sqrt(np.mean(indata.astype(np.float32) ** 2)))
+    except Exception:
+        pass
+
+
+def mic_test(enable: bool) -> bool:
+    """Open the mic (if needed) so the settings meter can show a live level.
+    Returns True if a stream is available."""
+    if enable:
+        if state.get("stream") is None:
+            state["stream"] = open_input_stream()
+        state["mic_test"] = True
+        return state.get("stream") is not None
+    state["mic_test"] = False
+    if config.get("mic_on_demand") and not state["recording"]:
+        close_stream()
+    return True
 
 
 def _make_stream(device):
@@ -702,6 +835,9 @@ def start_listener() -> keyboard.Listener:
     pressed: set[str] = set()
 
     def start_rec():
+        if not is_licensed():
+            log("dictation locked — no valid license")
+            return
         if state["model"] is None:
             log("model still loading, try again in a moment")
             return
@@ -872,6 +1008,8 @@ def _start_overlay() -> None:
 
 def _start_core() -> None:
     """Audio stream, model warm-up, hotkey listener — shared by all modes."""
+    license_status()  # populate state["license"] before any dictation attempt
+
     def boot():
         try:
             # installed build ships without CUDA libs — fetch them once if this
@@ -879,13 +1017,27 @@ def _start_core() -> None:
             if FROZEN and config.get("device") != "cpu":
                 try:
                     import cuda_setup
-                    if cuda_setup.ensure_cuda(DATA_DIR, log):
+
+                    def cuda_prog(done, total):
+                        set_download(True, "Драйвери GPU", mb=done >> 20,
+                                     total_mb=(total >> 20) if total else 0)
+
+                    if cuda_setup.ensure_cuda(DATA_DIR, log, cuda_prog):
                         register_cuda_dlls()
                 except Exception as e:
                     log(f"cuda provisioning skipped ({e.__class__.__name__}: {e})")
+                finally:
+                    set_download(False)
             # warm the model for the CURRENT language, not just the default en
             # one — otherwise the first Ukrainian dictation eats a ~3s load
-            state["model"] = model_for(LANGUAGES[state["lang"]])
+            stop = threading.Event()
+            threading.Thread(target=_watch_model_download,
+                             args=("Модель розпізнавання", stop), daemon=True).start()
+            try:
+                state["model"] = model_for(LANGUAGES[state["lang"]])
+            finally:
+                stop.set()
+                set_download(False)
             set_status("idle")
             log(f"ready. hold {hotkey_label(config['hotkey'])} = dictate "
                 f"({LANGUAGES[state['lang']]})")
