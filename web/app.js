@@ -129,7 +129,8 @@ function renderHome(el) {
     </div>
     <div class="card feed-card">
       <div class="feed-header">Останні диктовки</div>
-      ${state.recent.map((r) => `<div class="feed-row"><div class="feed-time mono">${esc(r.time)}</div><div class="feed-text mono">${esc(r.text)}</div></div>`).join("")}
+      ${state.recent.length ? state.recent.map((r) => `<div class="feed-row"><div class="feed-time mono">${esc(r.time)}</div><div class="feed-text mono">${esc(r.text)}</div></div>`).join("")
+        : `<div class="empty-state"><div class="empty-title">Ще немає диктовок</div><div class="empty-sub">Затисніть ${esc(state.hotkey)} і почніть говорити</div></div>`}
     </div>`;
   el.querySelectorAll(".preview-btn").forEach((b) => b.onclick = () => {
     state.manualHoldUntil = Date.now() + 6000;  // let the manual preview stay ~6s
@@ -200,6 +201,13 @@ function countUpStats() {
 
 // ---- HISTORY ----
 function renderHistory(el) {
+  if (!state.history.length) {
+    el.innerHTML = `<div class="empty-state">
+      <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"></path><polyline points="3 4 3 9 8 9"></polyline><polyline points="12 7 12 12 16 14"></polyline></svg>
+      <div class="empty-title">Історія порожня</div>
+      <div class="empty-sub">Ваші диктовки зʼявлятимуться тут</div></div>`;
+    return;
+  }
   el.innerHTML = `<div class="hist-header mono">${state.history.length} диктовок</div>` +
     state.history.map((it) => `
       <div class="hist-card" data-id="${it.id}">

@@ -191,14 +191,39 @@ textarea, input, select { font-family:inherit; }
   min-width:120px; }
 .hotkey-btn.listening { border-color:var(--accent); color:var(--accent);
   box-shadow:0 0 0 3px var(--accent-soft); }
-.select { padding:8px 12px; border-radius:9px; border:1px solid var(--border);
-  background:var(--s2); color:var(--t1); font-size:13px; cursor:pointer; outline:none;
-  min-width:180px; }
+.select { appearance:none; -webkit-appearance:none;
+  padding:8px 34px 8px 12px; border-radius:9px; border:1px solid var(--border);
+  background:var(--s2) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%239B9BA5' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E") no-repeat right 11px center;
+  color:var(--t1); font-size:13px; cursor:pointer; outline:none; min-width:180px;
+  transition:border-color .15s; }
+.select:hover { border-color:var(--border-strong); }
 .privacy-note { display:flex; align-items:center; gap:8px; padding:10px 12px; border-radius:9px;
   background:rgba(76,175,109,.12); color:var(--green); font-size:12.5px; margin-bottom:14px; }
 .key-wrap { display:flex; gap:6px; align-items:center; }
 .key-input { width:180px; background:var(--s2); border:1px solid var(--border);
   border-radius:8px; padding:8px 10px; color:var(--t1); font-size:12.5px; outline:none; }
+
+/* ---- polish: focus, press feedback, empty states ---- */
+button:focus-visible, .select:focus-visible, input:focus-visible,
+textarea:focus-visible {
+  outline:none; border-color:var(--accent-border);
+  box-shadow:0 0 0 3px var(--accent-soft);
+}
+.nav-item:active, .preview-btn:active, .hotkey-btn:active, .add-btn:active,
+.icon-btn:active, .chip-btn:active { transform:translateY(1px); }
+.stat-tile { transition:border-color .15s; }
+.body:hover .stat-tile:hover { border-color:var(--border-strong); }
+.empty-state { display:flex; flex-direction:column; align-items:center;
+  justify-content:center; gap:6px; padding:44px 20px; color:var(--t3);
+  text-align:center; }
+.empty-state svg { opacity:.5; margin-bottom:2px; }
+.empty-title { font-size:13px; font-weight:500; color:var(--t2); }
+.empty-sub { font-size:12px; color:var(--t3); }
+::selection { background:var(--accent-soft); color:var(--t1); }
+body, .shell, .sidebar, .topbar, .card, .hero, .stat-tile, .feed-row,
+.hist-card, .setting-row {
+  transition:background-color .22s ease, border-color .22s ease, color .18s ease;
+}
 </style>
 </head>
 <body>
