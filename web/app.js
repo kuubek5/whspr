@@ -562,8 +562,8 @@ function renderSettings(el) {
           </div>
         </div>
         <div class="setting-row" style="border:none">
-          <div><div class="setting-label">Модель Groq</div><div class="setting-hint">llama-3.3-70b-versatile — швидка й безкоштовна</div></div>
-          <input class="key-input mono" id="groqModel" value="${esc(s.groqModel || "")}" placeholder="llama-3.3-70b-versatile">
+          <div><div class="setting-label">Модель Groq</div><div class="setting-hint">openai/gpt-oss-20b — швидка й безкоштовна. Список: console.groq.com/docs/models</div></div>
+          <input class="key-input mono" id="groqModel" value="${esc(s.groqModel || "")}" placeholder="openai/gpt-oss-20b">
         </div>
       </div>
     </div>

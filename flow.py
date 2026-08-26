@@ -109,6 +109,9 @@ from faster_whisper import WhisperModel
 # ---------------- Config ----------------
 APP_VERSION = "1.0.0"
 GITHUB_REPO = "kuubek5/whspr"  # for the update check
+# Cloudflare (in front of Groq) 403s urllib's default agent — send a browser one
+HTTP_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+           "(KHTML, like Gecko) Chrome/120.0 Safari/537.36")
 # Default Systran repo is 401 on HF now; deepdml is the working CT2 mirror.
 MODEL_NAME = "deepdml/faster-whisper-large-v3-turbo-ct2"
 CONFIG_PATH = os.path.join(DATA_DIR, "config.json")
@@ -190,7 +193,7 @@ DEFAULTS = {
     # LLM post-processing: "off" | "groq" | "ollama"
     "llm": "off",
     "groq_api_key": "",
-    "groq_model": "llama-3.3-70b-versatile",
+    "groq_model": "openai/gpt-oss-20b",
     "ollama_model": "qwen2.5:7b",
     "autostart": False,
 }
@@ -235,6 +238,12 @@ def log(msg: str) -> None:
         pass
 
 
+# Groq models that have been decommissioned: a saved config still pointing at
+# one 404s on every request. Swap them for the current default on load.
+RETIRED_GROQ_MODELS = {"llama-3.3-70b-versatile", "llama-3.1-70b-versatile",
+                       "mixtral-8x7b-32768", "llama3-70b-8192"}
+
+
 def load_config() -> dict:
     cfg = json.loads(json.dumps(DEFAULTS))  # deep copy
     try:
@@ -242,6 +251,8 @@ def load_config() -> dict:
             cfg.update(json.load(f))
     except (FileNotFoundError, json.JSONDecodeError):
         pass
+    if cfg.get("groq_model") in RETIRED_GROQ_MODELS:
+        cfg["groq_model"] = DEFAULTS["groq_model"]
     return cfg
 
 
@@ -408,19 +419,21 @@ def _llm_request(system_prompt: str, user_text: str, label: str) -> str | None:
     if time.time() < state.get("llm_down_until", 0):
         return None
     try:
+        # a browser-like User-Agent is required: Groq sits behind Cloudflare,
+        # which blocks urllib's default "Python-urllib/x.y" agent with a 403
+        # (Cloudflare error 1010) before the request ever reaches the API
+        headers = {"Content-Type": "application/json", "User-Agent": HTTP_UA}
         if mode == "groq":
             if not config.get("groq_api_key"):
                 return None
             url = "https://api.groq.com/openai/v1/chat/completions"
             model = config.get("groq_model", DEFAULTS["groq_model"])
-            headers = {"Content-Type": "application/json",
-                       "Authorization": f"Bearer {config['groq_api_key']}"}
+            headers["Authorization"] = f"Bearer {config['groq_api_key']}"
         elif mode == "ollama":
             # 127.0.0.1, not localhost: the latter resolves to ::1 first and
             # doubles the wait when nothing is listening
             url = "http://127.0.0.1:11434/v1/chat/completions"
             model = config.get("ollama_model", DEFAULTS["ollama_model"])
-            headers = {"Content-Type": "application/json"}
         else:
             return None
         payload = {"model": model, "temperature": 0.2, "messages": [
