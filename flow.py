@@ -103,7 +103,7 @@ import ctypes
 import numpy as np
 import sounddevice as sd
 import pyperclip
-from pynput import keyboard
+from pynput import keyboard, mouse
 from faster_whisper import WhisperModel
 
 # ---------------- Config ----------------
@@ -1498,6 +1498,17 @@ def canon(key) -> str:
     return f"vk{vk}" if vk is not None else str(key)
 
 
+def canon_mouse(button) -> str | None:
+    """Bindable mouse buttons -> token; None for left/right (needed for normal
+    clicking, never safe to steal for a hotkey)."""
+    name = getattr(button, "name", "")
+    return f"mouse_{name}" if name in ("x1", "x2", "middle") else None
+
+
+MOUSE_LABELS = {"mouse_x1": "Бокова 1", "mouse_x2": "Бокова 2",
+                "mouse_middle": "Середня кнопка"}
+
+
 def parse_hotkey(spec: str) -> frozenset:
     """'ctrl+space' / 'f9' / 'alt+vk81' -> frozenset of canonical tokens."""
     out = set()
@@ -1518,6 +1529,8 @@ def hotkey_label(spec: str) -> str:
     for t in sorted(parse_hotkey(spec), key=lambda x: (x not in MODS, x)):
         if t in MODS:
             parts.append(t.capitalize())
+        elif t.startswith("mouse_"):
+            parts.append(MOUSE_LABELS.get(t, t))
         elif t.startswith("vk"):
             parts.append(VK_NAMES.get(int(t[2:]), t.upper()))
         else:
@@ -1525,9 +1538,9 @@ def hotkey_label(spec: str) -> str:
     return " + ".join(parts)
 
 
-def start_listener() -> keyboard.Listener:
-    """Hold-to-talk listener supporting single keys AND combos. Rebuilt on the
-    fly by restart_listener() when the user changes the hotkey."""
+def start_listener() -> "_Listeners":
+    """Hold-to-talk listener supporting single keys, combos, AND mouse side
+    buttons. Rebuilt on the fly by restart_listener() when the hotkey changes."""
     required = parse_hotkey(config["hotkey"])
     lang_key = parse_hotkey(config.get("lang_hotkey", "f10"))
     pressed: set[str] = set()
@@ -1603,37 +1616,73 @@ def start_listener() -> keyboard.Listener:
             if state["recording"]:
                 threading.Thread(target=silence_watch, daemon=True).start()
 
-    def on_press(key):
-        tok = canon(key)
-        # auto-repeat re-fires on_press for a held key with no on_release in
-        # between; a real new keystroke isn't in `pressed` yet. Only a fresh
-        # completing keystroke should toggle, else holding the key cycles it.
-        fresh = tok not in pressed
-        pressed.add(tok)
-        if required and required <= pressed and fresh:
+    # keyboard and mouse events arrive on two threads that share `pressed`;
+    # a lock keeps the trigger check and the set mutation consistent
+    lock = threading.Lock()
+
+    def handle_press(tok):
+        with lock:
+            # auto-repeat re-fires press for a held key with no release in
+            # between; a real new keystroke isn't in `pressed` yet. Only a fresh
+            # completing keystroke should toggle, else holding it cycles.
+            fresh = tok not in pressed
+            pressed.add(tok)
+            trig = required and required <= pressed and fresh
+            lang_hit = (lang_key and lang_key <= pressed and tok in lang_key
+                        and not (lang_key & MODS_SET))
+        if trig:
             if config.get("hands_free"):
                 toggle_hands_free()
             elif not state["recording"]:
                 start_rec()
-        elif lang_key and lang_key <= pressed and tok in lang_key and not (lang_key & MODS_SET):
+        elif lang_hit:
             # simple lang toggle only for non-combo lang key (avoid double-fire)
             state["lang"] = (state["lang"] + 1) % len(LANGUAGES)
             set_status(state["status"])
             log(f"language -> {LANGUAGES[state['lang']]}")
 
-    def on_release(key):
-        tok = canon(key)
+    def handle_release(tok):
+        with lock:
+            stop = (not config.get("hands_free") and state["recording"]
+                    and tok in required)
+            pressed.discard(tok)
         # hold-to-talk stops on release; hands-free ignores release (tap toggles)
-        if not config.get("hands_free") and state["recording"] and tok in required:
+        if stop:
             stop_rec()
-        pressed.discard(tok)
 
-    listener = keyboard.Listener(on_press=on_press, on_release=on_release)
-    listener.start()
-    return listener
+    def on_press(key):
+        handle_press(canon(key))
+
+    def on_release(key):
+        handle_release(canon(key))
+
+    def on_click(x, y, button, is_press):
+        tok = canon_mouse(button)
+        if tok is None:      # left/right stay normal clicks
+            return
+        (handle_press if is_press else handle_release)(tok)
+
+    kbd = keyboard.Listener(on_press=on_press, on_release=on_release)
+    ms = mouse.Listener(on_click=on_click)
+    kbd.start()
+    ms.start()
+    return _Listeners(kbd, ms)
 
 
 MODS_SET = frozenset(MODS)
+
+
+class _Listeners:
+    """Bundle the keyboard + mouse listeners so one .stop() tears down both."""
+    def __init__(self, *listeners):
+        self._listeners = listeners
+
+    def stop(self):
+        for l in self._listeners:
+            try:
+                l.stop()
+            except Exception:
+                pass
 
 
 def restart_listener() -> None:
@@ -1652,32 +1701,46 @@ _listener = None
 
 
 def capture_hotkey(on_done) -> None:
-    """Listen for the next key combo the user presses; call on_done(spec).
-    Fires when a non-modifier key is pressed (with whatever mods are held),
-    or when a lone modifier is released."""
+    """Listen for the next key combo OR mouse side button the user presses; call
+    on_done(spec). Fires on a non-modifier key (with whatever mods are held), a
+    lone modifier release, or a bindable mouse button."""
     held: list[str] = []
+    listeners: list = []
 
-    def finish(listener, tokens):
-        listener.stop()
+    def finish(tokens):
+        for l in listeners:
+            try:
+                l.stop()
+            except Exception:
+                pass
         spec = "+".join(sorted(tokens, key=lambda x: (x not in MODS, x)))
         on_done(spec)
 
-    def on_press(key):
-        tok = canon(key)
+    def press(tok):
         if tok not in held:
             held.append(tok)
-        if tok not in MODS_SET:  # a real key -> combo complete
-            finish(cap, list(held))
+        if tok not in MODS_SET:  # a real key / mouse button -> combo complete
+            finish(list(held))
             return False
+
+    def on_press(key):
+        return press(canon(key))
 
     def on_release(key):
-        tok = canon(key)
         if held and all(t in MODS_SET for t in held):  # only mods, released one
-            finish(cap, list(held))
+            finish(list(held))
             return False
 
-    cap = keyboard.Listener(on_press=on_press, on_release=on_release)
-    cap.start()
+    def on_click(x, y, button, is_press):
+        tok = canon_mouse(button)
+        if is_press and tok is not None:  # ignore left/right and releases
+            return press(tok)
+
+    kb = keyboard.Listener(on_press=on_press, on_release=on_release)
+    ms = mouse.Listener(on_click=on_click)
+    listeners += [kb, ms]
+    kb.start()
+    ms.start()
 
 
 class AppContext:
