@@ -66,9 +66,19 @@ class Api:
                 "device": c.get("device", "cuda"),
                 "inputDevice": c.get("input_device", ""),
                 "micOnDemand": c.get("mic_on_demand", False),
-                "backupKey": "", "backupKeyVisible": False,
+                "muteOthers": c.get("mute_others", True),
+                "spokenPunctuation": c.get("spoken_punctuation", True),
+                "normalizeNumbers": c.get("normalize_numbers", True),
+                "voiceCommands": c.get("voice_commands", True),
+                "handsFree": c.get("hands_free", False),
+                "llm": c.get("llm", "off"),
+                "groqKey": c.get("groq_api_key", ""),
+                "groqModel": c.get("groq_model", ""),
+                "ollamaModel": c.get("ollama_model", ""),
+                "groqKeyVisible": False,
             },
             "devices": flow.list_input_devices(),
+            "models": flow.models_status(),
             "dictionary": {
                 "hotwords": c.get("dictionary", ""),
                 "commands": [{"phrase": k, "result": v}
@@ -89,7 +99,13 @@ class Api:
         return flow.state["status"]
 
     def get_download(self):
-        return flow.state.get("download", {"active": False})
+        d = dict(flow.state.get("download", {"active": False}))
+        # downloading is the authoritative in-progress flag: `active` only flips
+        # true once the HF cache starts growing, so a fresh download reads as
+        # inactive for a moment while snapshot_download resolves the revision
+        d["downloading"] = flow.state.get("downloading") is not None
+        d["error"] = flow.state.get("download_error")
+        return d
 
     def get_input_level(self):
         return flow.state.get("input_level", 0.0)
@@ -141,25 +157,63 @@ class Api:
         old_dev = c.get("input_device", "")
         old_mode = c.get("mic_on_demand", False)
         old_device = c.get("device", "cuda")
-        old_model = c.get("model_uk", "stock")
         c["autostart"] = bool(s.get("autostart"))
         c["overlay"] = bool(s.get("floatingPanel"))
         c["sound"] = bool(s.get("sound"))
         c["auto_lang"] = bool(s.get("autoLang"))
-        c["model_uk"] = s.get("model", "stock")
+        # model_uk is deliberately not touched here: activate_model() owns it.
+        # Writing it from this payload too meant a stale value in the UI state
+        # could reset the model whenever any unrelated toggle was flipped.
         c["device"] = "cpu" if s.get("device") == "cpu" else "cuda"
         c["input_device"] = s.get("inputDevice", "") or ""
         c["mic_on_demand"] = bool(s.get("micOnDemand"))
+        c["mute_others"] = bool(s.get("muteOthers"))
+        c["spoken_punctuation"] = bool(s.get("spokenPunctuation"))
+        c["normalize_numbers"] = bool(s.get("normalizeNumbers"))
+        c["voice_commands"] = bool(s.get("voiceCommands"))
+        c["hands_free"] = bool(s.get("handsFree"))
+        if s.get("llm") in ("off", "groq", "ollama"):
+            c["llm"] = s["llm"]
+        # blank model fields fall back to the shipped defaults rather than
+        # writing "" and silently breaking the request
+        c["groq_api_key"] = s.get("groqKey", "") or ""
+        c["groq_model"] = s.get("groqModel", "") or flow.DEFAULTS["groq_model"]
+        c["ollama_model"] = s.get("ollamaModel", "") or flow.DEFAULTS["ollama_model"]
         flow.save_config(c)
         flow.set_autostart(c["autostart"])
         if c["input_device"] != old_dev or c["mic_on_demand"] != old_mode:
             flow.restart_stream()
-        if c["device"] != old_device or c["model_uk"] != old_model:
+        if c["device"] != old_device:
             flow.reload_models()
         return True
 
     def list_devices(self):
         return flow.list_input_devices()
+
+    # ---- model library ----
+    def list_models(self):
+        return flow.models_status()
+
+    def download_model(self, key):
+        return flow.download_model(key)
+
+    def delete_model(self, key):
+        return flow.delete_model(key)
+
+    def activate_model(self, key):
+        """Switch the active model, but only to one that is already on disk —
+        activating a missing model would stall the next dictation on a download."""
+        if key not in flow.MODELS:
+            return {"ok": False, "error": "невідома модель"}
+        if not flow.model_installed(flow.MODELS[key]["repo"]):
+            return {"ok": False, "error": "модель не завантажена"}
+        c = flow.config
+        if c.get("model_uk") == key:
+            return {"ok": True}
+        c["model_uk"] = key
+        flow.save_config(c)
+        flow.reload_models()
+        return {"ok": True}
 
     def save_dictionary(self, hotwords, commands):
         c = flow.config
@@ -215,7 +269,12 @@ def run() -> None:
 
     # Closing the window hides it to the tray instead of quitting — dictation
     # keeps working in the background. Quit via the tray menu ("Вихід").
+    # Without a tray icon there would be no way back to the window and no way
+    # to quit, so in that case let the close actually close.
     def _on_closing():
+        if flow.tray_icon is None:
+            flow.log("no tray icon — closing the window quits")
+            return True
         try:
             window.hide()
         except Exception:

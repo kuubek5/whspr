@@ -180,6 +180,12 @@ textarea, input, select { font-family:inherit; }
 .setting-row:last-child { border-bottom:none; }
 .setting-label { font-size:13px; font-weight:500; margin-bottom:3px; }
 .setting-hint { font-size:11.5px; color:var(--t3); }
+/* model library rows */
+.model-actions { display:flex; align-items:center; gap:6px; flex-shrink:0; }
+.model-row.on .setting-label { color:var(--accent); }
+.model-active { font-size:11.5px; color:var(--green); font-weight:500;
+  padding:6px 10px; border:1px solid var(--green); border-radius:8px; }
+.preview-btn[disabled] { opacity:.6; cursor:default; }
 .toggle { width:38px; height:22px; border-radius:11px; background:var(--track-off);
   border:none; cursor:pointer; padding:3px; transition:.18s; flex-shrink:0; }
 .toggle.on { background:var(--accent); }
@@ -199,6 +205,9 @@ textarea, input, select { font-family:inherit; }
 .select:hover { border-color:var(--border-strong); }
 .privacy-note { display:flex; align-items:center; gap:8px; padding:10px 12px; border-radius:9px;
   background:rgba(76,175,109,.12); color:var(--green); font-size:12.5px; margin-bottom:14px; }
+/* cloud polish sends text off-device — the note stops being a reassurance */
+.privacy-note.warn { background:rgba(240,180,41,.12); color:var(--amber, #f0b429); }
+.privacy-note svg { flex-shrink:0; }
 .key-wrap { display:flex; gap:6px; align-items:center; }
 .key-input { width:180px; background:var(--s2); border:1px solid var(--border);
   border-radius:8px; padding:8px 10px; color:var(--t1); font-size:12.5px; outline:none; }

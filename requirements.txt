@@ -6,6 +6,9 @@ numpy
 pystray>=0.19
 pillow
 pywebview>=6.0
+# mutes other apps' audio while dictating (Windows Core Audio session control);
+# optional — without it whspr still dictates, it just doesn't duck playback
+pycaw>=20240210
 # Ed25519 signing/verification for offline license keys
 cryptography>=42.0
 # customtkinter powers the older --classic UI; the default UI is pywebview (web/)

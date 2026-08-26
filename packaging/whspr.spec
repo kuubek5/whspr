@@ -15,7 +15,7 @@ ROOT = os.path.dirname(SPECPATH)  # spec lives in packaging/, code in repo root
 datas = [(os.path.join(ROOT, "web"), "web"), (os.path.join(ROOT, "whspr.ico"), ".")]
 binaries = []
 hiddenimports = ["comtypes", "pystray._win32", "cuda_setup", "webview_app",
-                 "ui", "licensing"]
+                 "ui", "licensing", "pycaw", "pycaw.pycaw"]
 
 # pull in data files / dylibs / submodules for the tricky native packages
 for pkg in ("webview", "ctranslate2", "faster_whisper", "sounddevice",

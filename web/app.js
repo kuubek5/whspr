@@ -13,8 +13,12 @@ const state = {
   recent: [], history: [],
   settings: { autostart: true, floatingPanel: true, sound: false, autoLang: true,
               model: "uk-ft", gpuDevice: "RTX 4070", device: "cuda", inputDevice: "", micOnDemand: false,
-              backupKeyVisible: false, backupKey: "" },
+              muteOthers: true,
+              llm: "off", groqKey: "", groqModel: "", ollamaModel: "",
+              groqKeyVisible: false, spokenPunctuation: true, normalizeNumbers: true,
+              voiceCommands: true, handsFree: false },
   devices: [],
+  models: [],
   dictionary: { hotwords: "", commands: [] },
 };
 
@@ -27,7 +31,33 @@ async function api(method, ...args) {
   }
   return mock(method, args);
 }
+const MOCK_MODELS = [
+  { id: "stock", label: "Large v3 Turbo", size: "1.5 GB", note: "швидка, за замовчуванням", installed: true, active: true, diskMb: 3093 },
+  { id: "uk-ft", label: "Large v3 Turbo UA", size: "1.5 GB", note: "донавчена на розмовній українській", installed: true, active: false, diskMb: 3088 },
+  { id: "large-v3", label: "Large v3", size: "2.9 GB", note: "найточніша, найповільніша", installed: false, active: false, diskMb: 0 },
+  { id: "distil-large-v3", label: "Distil Large v3", size: "1.5 GB", note: "швидша за Large v3", en: true, installed: false, active: false, diskMb: 0 },
+  { id: "medium", label: "Medium", size: "1.4 GB", note: "компроміс точність/швидкість", installed: false, active: false, diskMb: 0 },
+  { id: "small", label: "Small", size: "465 MB", note: "легка, слабший GPU", installed: false, active: false, diskMb: 0 },
+  { id: "base", label: "Base", size: "141 MB", note: "дуже легка, помітно гірша якість", installed: false, active: false, diskMb: 0 },
+  { id: "tiny", label: "Tiny", size: "74 MB", note: "найшвидша, найгірша якість", installed: false, active: false, diskMb: 0 },
+];
+
 function mock(method, args) {
+  if (method === "list_models") return MOCK_MODELS;
+  if (method === "activate_model") {
+    MOCK_MODELS.forEach((m) => m.active = m.id === args[0] && m.installed);
+    return { ok: true };
+  }
+  if (method === "delete_model") {
+    const m = MOCK_MODELS.find((x) => x.id === args[0]);
+    if (m) { m.installed = false; m.diskMb = 0; }
+    return { ok: true };
+  }
+  if (method === "download_model") {
+    const m = MOCK_MODELS.find((x) => x.id === args[0]);
+    if (m) { m.installed = true; m.diskMb = 2048; }
+    return { ok: true };
+  }
   if (method === "bootstrap") return {
     theme: "dark", gpu: "RTX 3070", hotkey: "Fn", version: "1.0.0",
     license: { licensed: true, daysLeft: 23, exp: "2026-08-04", reason: "ok", customer: "demo@buyer" },
@@ -47,6 +77,7 @@ function mock(method, args) {
     settings: state.settings,
     devices: [{ name: "Мікрофон (Realtek Audio)" }, { name: "Вхід (XONAR SOUND CARD)" },
               { name: "OnePlus 9R Hands-Free" }],
+    models: MOCK_MODELS,
     dictionary: {
       hotwords: "Klipper, PID, sinter, FPV, Proxmox, homelab, Vaultwarden",
       commands: [
@@ -77,6 +108,7 @@ async function boot() {
   state.stats = b.stats; state.recent = b.recent; state.history = b.history;
   state.settings = Object.assign(state.settings, b.settings || {});
   state.devices = b.devices || [];
+  state.models = b.models || [];
   state.dictionary = b.dictionary; state.homeState = b.status || "idle";
   applyTheme(); document.getElementById("gpuBadge").textContent = "Локально · " + state.gpu;
   render(); pollStatus(); pollDownload(); checkUpdate();
@@ -98,6 +130,87 @@ async function pollDownload() {
       box.style.display = "block";
     } else box.style.display = "none";
   }, 500);
+}
+
+// ---- model library ----
+function fmtMb(mb) { return mb >= 1024 ? (mb / 1024).toFixed(1) + " GB" : mb + " MB"; }
+
+function renderModelList(host) {
+  if (!host) return;
+  host.innerHTML = state.models.map((m) => {
+    // downloaded models report real disk use, which runs above the download
+    // size because the HF cache keeps blobs and snapshot copies side by side
+    const meta = m.installed
+      ? `на диску · ${fmtMb(m.diskMb)}`
+      : `завантаження · ${esc(m.size)}`;
+    const tags = [m.en ? "тільки англійська" : "", m.note].filter(Boolean).map(esc).join(" · ");
+    let actions;
+    if (m.active) {
+      actions = `<span class="model-active">Активна</span>`;
+    } else if (m.installed) {
+      actions = `<button class="preview-btn" data-act="use" data-id="${esc(m.id)}">Обрати</button>
+                 <button class="chip-btn" data-act="del" data-id="${esc(m.id)}" title="Видалити з диска">✕</button>`;
+    } else {
+      actions = `<button class="preview-btn" data-act="get" data-id="${esc(m.id)}">Завантажити</button>`;
+    }
+    return `<div class="setting-row model-row${m.active ? " on" : ""}">
+      <div>
+        <div class="setting-label">${esc(m.label)}</div>
+        <div class="setting-hint">${meta}${tags ? " — " + tags : ""}</div>
+      </div>
+      <div class="model-actions">${actions}</div>
+    </div>`;
+  }).join("");
+
+  host.querySelectorAll("[data-act]").forEach((b) => b.onclick = async () => {
+    const id = b.dataset.id;
+    if (b.dataset.act === "use") {
+      const r = await api("activate_model", id);
+      if (r && r.ok === false) return alert(r.error || "не вдалося");
+    } else if (b.dataset.act === "get") {
+      b.disabled = true; b.textContent = "Качається…";
+      const r = await api("download_model", id);
+      if (r && r.ok === false) { b.disabled = false; b.textContent = "Завантажити"; return alert(r.error); }
+      pollModelDownload(host);
+      return;  // list refreshes when the download finishes
+    } else if (b.dataset.act === "del") {
+      const m = state.models.find((x) => x.id === id);
+      if (!confirm(`Видалити ${m.label} з диска? Звільниться ${fmtMb(m.diskMb)}.`)) return;
+      const r = await api("delete_model", id);
+      if (r && r.ok === false) return alert(r.error || "не вдалося");
+    }
+    await refreshModels(host);
+  });
+}
+
+async function refreshModels(host) {
+  state.models = (await api("list_models")) || state.models;
+  const s = state.settings;
+  const active = state.models.find((m) => m.active);
+  if (active) s.model = active.id;
+  renderModelList(host || document.getElementById("modelList"));
+}
+
+// distinct from pollDownload() (the Home-page #dlProgress banner): this one
+// tracks a model download started from the Models list and refreshes that list
+let modelDlTimer = null;
+function pollModelDownload(host) {
+  if (modelDlTimer) return;
+  modelDlTimer = setInterval(async () => {
+    const d = await api("get_download");
+    const el = document.getElementById("modelList");
+    if (!el) { clearInterval(modelDlTimer); modelDlTimer = null; return; }
+    // finish only when the backend says it's no longer downloading; `active`
+    // alone lags at the start (cache walk) and would end the poll prematurely
+    if (d && d.downloading) {
+      const btn = el.querySelector('[data-act="get"][disabled]');
+      if (btn) btn.textContent = d.mb ? `Качається… ${fmtMb(d.mb)}` : "Качається…";
+    } else {
+      clearInterval(modelDlTimer); modelDlTimer = null;
+      if (d && d.error) alert("Не вдалося завантажити модель: " + d.error);
+      await refreshModels(host);
+    }
+  }, 700);
 }
 
 // ---- mic test / level meter ----
@@ -385,7 +498,11 @@ function renderSettings(el) {
       ${toggleRow("Запускати з Windows", "Автоматично запускати whspr при вході в систему", "autostart")}
       ${toggleRow("Показувати плаваючу панель", "Індикатор запису поверх усіх вікон", "floatingPanel")}
       ${toggleRow("Звук при завершенні диктовки", "Короткий сигнал, коли текст готовий", "sound")}
-      ${toggleRow("Автоматичне визначення мови", "whspr сам визначить українську чи англійську", "autoLang", true)}
+      ${toggleRow("Автоматичне визначення мови", "whspr сам визначить українську чи англійську", "autoLang")}
+      ${toggleRow("Голосова пунктуація", "Слова «кома», «крапка», «знак питання» стають , . ?", "spokenPunctuation")}
+      ${toggleRow("Числа цифрами", "«триста п'ятдесят два» → «352»", "normalizeNumbers")}
+      ${toggleRow("Голосові команди", "«великими літерами», «видали останнє», «переклади англійською» — діють на попередню диктовку", "voiceCommands")}
+      ${toggleRow("Режим без утримання", "Тап клавіші вмикає запис, авто-стоп після паузи (або тап ще раз). Інакше — утримувати клавішу", "handsFree", true)}
     </div>
     <div class="card">
       <div class="section-title" style="margin-bottom:6px">Гаряча клавіша</div>
@@ -401,6 +518,7 @@ function renderSettings(el) {
         <select class="select" id="selMic"></select>
       </div>
       ${toggleRow("Відкривати мікрофон лише під час запису", "Прибирає значок мікрофона в треї; можливе зрізання перших мілісекунд фрази", "micOnDemand", true)}
+      ${toggleRow("Глушити інші звуки під час запису", "Музика, відео та сповіщення стихають, поки ви диктуєте, і вмикаються назад після відпускання клавіші", "muteOthers", true)}
       <div class="mic-test">
         <button class="preview-btn" id="micTestBtn">Перевірити</button>
         <div class="level"><div class="level-fill" id="levelFill"></div><div class="level-thresh"></div></div>
@@ -409,13 +527,8 @@ function renderSettings(el) {
     </div>
     <div class="card">
       <div class="section-title" style="margin-bottom:6px">Модель розпізнавання</div>
-      <div class="setting-row">
-        <div><div class="setting-label">Модель для української</div><div class="setting-hint">uk-ft — донавчена на розмовній українській</div></div>
-        <select class="select" id="selModel">
-          <option value="stock">stock-large-v3</option>
-          <option value="uk-ft">uk-ft-v2 (рекомендовано)</option>
-        </select>
-      </div>
+      <div class="setting-hint" style="margin-bottom:10px">Більша — точніша, менша — швидша. Завантажуйте лише те, чим користуєтесь</div>
+      <div id="modelList"></div>
       <div class="setting-row" style="border:none">
         <div><div class="setting-label">Пристрій обробки</div><div class="setting-hint">Де рахувати модель: GPU швидко, CPU повільний запасний. Уся обробка локально</div></div>
         <select class="select" id="selGpu">
@@ -425,20 +538,43 @@ function renderSettings(el) {
       </div>
     </div>
     <div class="card">
-      <div class="section-title" style="margin-bottom:10px">Приватність</div>
-      <div class="privacy-note"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 4 5v6c0 5 3.5 8.5 8 11 4.5-2.5 8-6 8-11V5l-8-3Z"></path></svg>Диктовки ніколи не залишають цей пристрій</div>
-      <div class="setting-row" style="border:none">
-        <div><div class="setting-label">Ключ шифрування резервної копії</div><div class="setting-hint">Необов'язково — для локального шифрованого бекапу</div></div>
-        <div class="key-wrap">
-          <input class="key-input mono" id="keyInput" type="password" value="${esc(s.backupKey)}" readonly>
-          <button class="chip-btn" id="keyEye"></button>
+      <div class="section-title" style="margin-bottom:6px">Полірування тексту (AI)</div>
+      <div class="setting-hint" style="margin-bottom:10px">Прибирає слова-паразити, розставляє пунктуацію. Виконується після розпізнавання</div>
+      <div class="setting-row">
+        <div><div class="setting-label">Режим</div><div class="setting-hint">Ollama — локально й безкоштовно. Groq — швидко, але текст іде на чужий сервер</div></div>
+        <select class="select" id="selLlm">
+          <option value="off">Вимкнено</option>
+          <option value="ollama">Ollama (локально)</option>
+          <option value="groq">Groq (хмара)</option>
+        </select>
+      </div>
+      <div id="llmOllama" class="setting-row">
+        <div><div class="setting-label">Модель Ollama</div><div class="setting-hint">Має бути завантажена: <span class="mono">ollama pull ${esc(s.ollamaModel || "qwen2.5:7b")}</span></div></div>
+        <input class="key-input mono" id="ollamaModel" value="${esc(s.ollamaModel || "")}" placeholder="qwen2.5:7b">
+      </div>
+      <div id="llmGroq">
+        <div class="privacy-note warn"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>З Groq кожна диктовка надсилається на сервери Groq. Не вмикайте для конфіденційного тексту</div>
+        <div class="setting-row">
+          <div><div class="setting-label">Ключ Groq API</div><div class="setting-hint">Безкоштовний тариф на console.groq.com</div></div>
+          <div class="key-wrap">
+            <input class="key-input mono" id="groqKey" type="password" value="${esc(s.groqKey || "")}" placeholder="gsk_…">
+            <button class="chip-btn" id="keyEye"></button>
+          </div>
+        </div>
+        <div class="setting-row" style="border:none">
+          <div><div class="setting-label">Модель Groq</div><div class="setting-hint">llama-3.3-70b-versatile — швидка й безкоштовна</div></div>
+          <input class="key-input mono" id="groqModel" value="${esc(s.groqModel || "")}" placeholder="llama-3.3-70b-versatile">
         </div>
       </div>
+    </div>
+    <div class="card">
+      <div class="section-title" style="margin-bottom:10px">Приватність</div>
+      <div class="privacy-note" id="privacyNote"></div>
     </div>`;
   el.querySelectorAll(".toggle").forEach((t) => t.onclick = () => {
     const k = t.dataset.key; s[k] = !s[k]; t.classList.toggle("on", s[k]); saveSettings();
   });
-  const selM = el.querySelector("#selModel"); selM.value = s.model; selM.onchange = () => { s.model = selM.value; saveSettings(); };
+  renderModelList(el.querySelector("#modelList"));
   const selG = el.querySelector("#selGpu"); selG.value = s.device || "cuda"; selG.onchange = () => { s.device = selG.value; saveSettings(); };
   const selMic = el.querySelector("#selMic");
   selMic.innerHTML = `<option value="">Системний за замовчуванням</option>` +
@@ -458,9 +594,34 @@ function renderSettings(el) {
     } else err.textContent = (res && res.error) || "Помилка активації";
   };
   el.querySelector("#hotkeyBtn").onclick = captureHotkey;
+
+  // ---- AI polish ----
+  const selLlm = el.querySelector("#selLlm");
+  selLlm.value = s.llm || "off";
+  const syncLlm = () => {
+    el.querySelector("#llmOllama").style.display = s.llm === "ollama" ? "" : "none";
+    el.querySelector("#llmGroq").style.display = s.llm === "groq" ? "" : "none";
+    // the privacy claim has to follow reality: with Groq the text does leave
+    const cloud = s.llm === "groq";
+    el.querySelector("#privacyNote").innerHTML =
+      `<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 4 5v6c0 5 3.5 8.5 8 11 4.5-2.5 8-6 8-11V5l-8-3Z"></path></svg>` +
+      (cloud
+        ? "Розпізнавання — локальне, але полірування надсилає текст у Groq"
+        : "Диктовки ніколи не залишають цей пристрій");
+    el.querySelector("#privacyNote").classList.toggle("warn", cloud);
+  };
+  syncLlm();
+  selLlm.onchange = () => { s.llm = selLlm.value; syncLlm(); saveSettings(); };
+  const bindText = (id, key) => {
+    const inp = el.querySelector("#" + id);
+    inp.onchange = () => { s[key] = inp.value.trim(); saveSettings(); };
+  };
+  bindText("ollamaModel", "ollamaModel");
+  bindText("groqModel", "groqModel");
+  bindText("groqKey", "groqKey");
   const eye = el.querySelector("#keyEye"); setEye(eye);
-  eye.onclick = () => { s.backupKeyVisible = !s.backupKeyVisible;
-    el.querySelector("#keyInput").type = s.backupKeyVisible ? "text" : "password"; setEye(eye); };
+  eye.onclick = () => { s.groqKeyVisible = !s.groqKeyVisible;
+    el.querySelector("#groqKey").type = s.groqKeyVisible ? "text" : "password"; setEye(eye); };
 }
 function toggleRow(label, hint, key, last) {
   const on = state.settings[key];
@@ -469,7 +630,7 @@ function toggleRow(label, hint, key, last) {
     <button class="toggle ${on ? "on" : ""}" data-key="${key}"><div class="toggle-thumb"></div></button></div>`;
 }
 function setEye(btn) {
-  btn.innerHTML = state.settings.backupKeyVisible
+  btn.innerHTML = state.settings.groqKeyVisible
     ? '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M17.9 17.9A10.6 10.6 0 0 1 12 19c-7 0-11-7-11-7a19 19 0 0 1 5-5.9M9.9 4.2A9.7 9.7 0 0 1 12 4c7 0 11 7 11 7a19 19 0 0 1-2.3 3.2M14.1 14.1a3 3 0 1 1-4.2-4.2"></path><line x1="2" y1="2" x2="22" y2="22"></line></svg>'
     : '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z"></path><circle cx="12" cy="12" r="3"></circle></svg>';
 }

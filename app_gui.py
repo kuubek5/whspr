@@ -378,11 +378,20 @@ class WhsprApp:
             rms = float(self.s_rms.get().replace(",", "."))
         except ValueError:
             rms = 0.003
+        # don't switch to a model that isn't downloaded — the next dictation
+        # would otherwise block on a synchronous multi-GB pull under the model
+        # lock. Keep the current model and warn instead.
+        sel_model = self.s_model.get()
+        repo = self.ctx.UK_MODELS.get(sel_model)
+        if repo and not self.ctx.model_installed(repo):
+            sel_model = c.get("model_uk", "stock")
+            self.s_model.set(sel_model)
+            self._flash(self.set_saved, "Модель не завантажена")
         c.update({
             "hotkey": self.s_hotkey,
             "lang_hotkey": self.s_lang_hotkey,
             "language": self.s_lang.get(),
-            "model_uk": self.s_model.get(),
+            "model_uk": sel_model,
             "llm": self.s_llm.get(),
             "groq_api_key": self.s_groq.get().strip(),
             "beam_size": int(self.s_beam.get()),
