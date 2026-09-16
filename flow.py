@@ -118,7 +118,7 @@ from faster_whisper import WhisperModel
 import text_fixes
 
 # ---------------- Config ----------------
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 GITHUB_REPO = "kuubek5/whspr"  # for the update check
 # Cloudflare (in front of Groq) 403s urllib's default agent — send a browser one
 HTTP_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -2592,14 +2592,11 @@ def _start_core() -> None:
 def main() -> None:
     global overlay
     ensure_single_instance()
-    # Give mic_level our logger so its COM failures land in whspr.log like
-    # everything else. Optional module: a build without it just loses the
-    # "raise the mic level" button, never the ability to dictate.
-    try:
-        import mic_level
-        mic_level.set_logger(log)
-    except Exception as e:
-        log(f"mic_level unavailable ({e.__class__.__name__}: {e})")
+    # NOTE: mic_level is deliberately NOT imported or wired up here. Activating
+    # the Windows capture endpoint from the UI thread crashed the process
+    # (0xc0000374 / 0xc0000005 in _ctypes.pyd) — see Api._mic_endpoint_state in
+    # webview_app.py. The module stays in the tree for a future, properly
+    # threaded version; nothing calls it today.
     _set_app_id()
     mode = _mode()
 

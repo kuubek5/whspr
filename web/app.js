@@ -63,7 +63,7 @@ function mock(method, args) {
     return { ok: true };
   }
   if (method === "bootstrap") return {
-    theme: "dark", gpu: "RTX 3070", hotkey: "Fn", version: "1.0.0",
+    theme: "dark", gpu: "RTX 3070", hotkey: "Fn", version: "1.2.0",
     license: { licensed: true, daysLeft: 23, exp: "2026-08-04", reason: "ok", customer: "demo@buyer" },
     status: "idle",
     stats: { wordsToday: 2481, dictations: 37, wordsTotal: 184920, wpm: 132 },
@@ -118,6 +118,8 @@ async function boot() {
   state.models = b.models || [];
   state.dictionary = b.dictionary; state.homeState = b.status || "idle";
   applyTheme(); document.getElementById("gpuBadge").textContent = "Локально · " + state.gpu;
+  const vl = document.getElementById("verLine");
+  if (vl && state.version) vl.textContent = "v" + state.version;
   render(); pollStatus(); pollDownload(); checkUpdate();
 }
 

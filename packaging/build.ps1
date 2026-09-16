@@ -31,4 +31,8 @@ Write-Host "==> Inno Setup packaging" -ForegroundColor Cyan
 & $iscc packaging\whspr.iss
 if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
 
-Write-Host "Installer: packaging\Output\whspr-setup.exe" -ForegroundColor Green
+# Report what was actually produced rather than a hardcoded name: the installer
+# filename carries the version now, so a stale literal here would drift every
+# time the version is bumped.
+$built = Get-ChildItem "$root\packaging\Output\*.exe" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+Write-Host "Installer: $($built.FullName) ($([math]::Round($built.Length/1MB,1)) MB)" -ForegroundColor Green

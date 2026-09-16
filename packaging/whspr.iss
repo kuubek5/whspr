@@ -5,7 +5,7 @@
 ; Output: packaging\Output\whspr-setup.exe
 
 #define AppName "whspr"
-#define AppVersion "1.1.0"
+#define AppVersion "1.2.0"
 #define AppPublisher "whspr"
 #define AppExe "whspr.exe"
 
@@ -21,7 +21,11 @@ DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 UninstallDisplayIcon={app}\{#AppExe}
 OutputDir=Output
-OutputBaseFilename=whspr-setup
+; Versioned filename. A fixed "whspr-setup.exe" silently overwrote the previous
+; build, so two installers with different contents could both claim 1.1.0 with
+; nothing on disk to tell them apart — and check_update(), which compares
+; versions, would not see the newer one as newer.
+OutputBaseFilename=whspr-setup-{#AppVersion}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern

@@ -89,6 +89,9 @@ body {
 .nav-item.active { color:var(--t1); }
 .sidebar-footer { margin-top:auto; padding:8px; }
 .gpu-badge { display:flex; align-items:center; gap:7px; font-size:11px; color:var(--t2); }
+/* version line: quiet, one glance answers "which build am I on". Its own line
+   under the GPU badge so it never competes with it. */
+.ver-line { font-size:10.5px; color:var(--t3); padding:5px 0 0 13px; letter-spacing:.02em; }
 .gpu-dot { width:6px; height:6px; border-radius:50%; background:var(--green);
   box-shadow:0 0 6px var(--green); }
 
@@ -337,6 +340,7 @@ body, .shell, .sidebar, .topbar, .card, .hero, .stat-tile, .feed-row,
     </nav>
     <div class="sidebar-footer">
       <div class="gpu-badge"><span class="gpu-dot"></span><span id="gpuBadge">Локально · …</span></div>
+      <div class="ver-line" id="verLine"></div>
     </div>
   </aside>
 

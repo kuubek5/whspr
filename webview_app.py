@@ -114,20 +114,29 @@ class Api:
     def mic_test(self, on):
         return flow.mic_test(bool(on))
 
-    # mic_level is an optional sibling module: it drives the Windows audio
-    # endpoint through pycaw, which can be absent in a stripped build. Import it
-    # at call time so the app still starts — and still warns — without it.
-    @staticmethod
-    def _mic_level():
-        try:
-            import mic_level
-        except Exception:
-            return None
-        try:
-            mic_level.set_logger(flow.log)  # its diagnostics belong in whspr.log
-        except Exception:
-            pass
-        return mic_level
+
+    def _mic_endpoint_state(self, quiet: bool):
+        """(can_fix, level) for the banner. Currently always (False, None).
+
+        DISABLED, and the reason is worth keeping. Probing the capture endpoint
+        means activating COM objects from the pywebview JS-bridge thread, and on
+        this machine that kills the process outright: pythonw died with
+        0xc0000374 (heap corruption in ntdll) and 0xc0000005 in _ctypes.pyd at
+        the same +0x784d offset, every time within seconds of the probe running.
+        Rate-limiting it to once a minute only made the crash rarer, not absent —
+        the frequency was never the problem, the bridge thread's COM apartment
+        is. duck_others() gets away with the same pycaw calls because it only
+        ever runs on the pynput listener thread.
+
+        The banner itself still works and still carries the measured RMS; it just
+        offers advice instead of a button. On the machine this was built for that
+        costs nothing, because its endpoint already sits at 100% and the button
+        could never have helped — the headroom is in the driver's Microphone
+        Boost. mic_level.py stays in the tree and is correct when called from an
+        ordinary thread; re-wiring it needs a dedicated COM thread that owns the
+        endpoint for the process lifetime, which is a change worth making
+        deliberately rather than in a hotfix."""
+        return False, None
 
     def get_mic_warning(self):
         """{"quiet": bool, "rms": float|None, "canFix": bool, "level": float|None}
@@ -137,17 +146,11 @@ class Api:
         with a quiet signal the remaining headroom is in the driver's separate
         "Microphone Boost", which Core Audio's master scalar cannot reach, so the
         UI has to stop offering a button that would do nothing."""
-        m = self._mic_level()
-        can_fix, level = False, None
-        if m is not None:
-            try:
-                can_fix = bool(m.is_boost_available())
-                level = m.get_level()
-            except Exception:
-                can_fix, level = False, None
+        quiet = bool(flow.state.get("mic_too_quiet", False))
+        can_fix, level = self._mic_endpoint_state(quiet)
         rms = flow.state.get("mic_rms")
         return {
-            "quiet": bool(flow.state.get("mic_too_quiet", False)),
+            "quiet": quiet,
             # None until the first take has actually been measured
             "rms": float(rms) if isinstance(rms, (int, float)) else None,
             "canFix": can_fix,
@@ -155,21 +158,18 @@ class Api:
         }
 
     def fix_mic_level(self):
-        """Raise the capture-endpoint volume. Returns mic_level.raise_level()'s
-        dict; without the module, a same-shaped dict telling the user where the
-        Windows slider lives, so the banner always has something to say."""
-        m = self._mic_level()
-        if m is None:
-            return {"ok": False, "changed": False,
-                    "reason": "Автоматичне підняття рівня недоступне. "
-                              "Підніміть гучність мікрофона у Windows: "
-                              "Звук → Ввід → Властивості → Рівні."}
-        try:
-            return m.raise_level()
-        except Exception as e:
-            flow.log(f"fix_mic_level failed ({e.__class__.__name__}: {e})")
-            return {"ok": False, "changed": False,
-                    "reason": "Не вдалося змінити гучність мікрофона."}
+        """Tell the user where the Windows slider is. Deliberately does NOT
+        touch COM — see _mic_endpoint_state for why that crashes the process.
+
+        _mic_endpoint_state returns canFix=False, so the banner never renders
+        the button that would call this; the method stays so an older cached
+        page cannot reach a missing API, and so re-enabling the feature later is
+        a one-place change."""
+        return {"ok": False, "changed": False,
+                "reason": "Підніміть гучність мікрофона у Windows: "
+                          "Звук → Ввід → Властивості → Рівні. Якщо повзунок уже "
+                          "на максимумі, шукайте «Підсилення мікрофона» "
+                          "(Microphone Boost) там само."}
 
     def get_license(self):
         return flow.license_status()
