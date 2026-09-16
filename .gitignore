@@ -5,6 +5,9 @@ __pycache__/
 
 # user data — private, never commit
 config.json
+# any backup/copy of it too - it holds the Groq API key, and a bare
+# `git add .` would otherwise stage config.json.bak
+config.json.*
 history.db
 whspr.log
 *.log

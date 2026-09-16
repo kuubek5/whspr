@@ -71,7 +71,7 @@ function render(p){
   if (s === "recording") {
     const secs = Math.floor((Date.now() - recStart) / 1000);
     pill.innerHTML = `<span class="dot rec"></span><span class="wave">${bars(16)}</span><span class="mono txt" style="color:var(--t1)">${fmt(secs)}</span>`;
-  } else if (s === "transcribing") {
+  } else if (s === "processing") {  // backend status name for transcription
     pill.innerHTML = `<span class="dot neutral"></span><span class="shim">Розпізнаю…</span>`;
   } else if (s === "loading") {
     pill.innerHTML = `<span class="dot neutral"></span><span class="shim">Завантаження моделі…</span>`;

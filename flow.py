@@ -12,9 +12,12 @@ import sys
 import json
 import time
 import shutil
+import logging
+import logging.handlers
 import sqlite3
 import threading
 import collections
+import urllib.error
 import urllib.request
 
 BASE = os.path.dirname(os.path.abspath(__file__))
@@ -106,8 +109,16 @@ import pyperclip
 from pynput import keyboard, mouse
 from faster_whisper import WhisperModel
 
+# Pure text post-processing (stdlib only, no side effects at import): the
+# subtitle-artifact list and trimmer, dictionary term restoration, and the
+# Russian-drift detector. Kept in its own module because every function in it is
+# a pure string transform with its own unit tests (test_text_fixes.py) — mixing
+# them into this file would make them untestable without booting the audio
+# stack. PyInstaller needs it listed in packaging/whspr.spec.
+import text_fixes
+
 # ---------------- Config ----------------
-APP_VERSION = "1.0.0"
+APP_VERSION = "1.1.0"
 GITHUB_REPO = "kuubek5/whspr"  # for the update check
 # Cloudflare (in front of Groq) 403s urllib's default agent — send a browser one
 HTTP_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -153,13 +164,44 @@ DEFAULTS = {
     "model_uk": "stock",
     # compute device: "cuda" (GPU, fast) or "cpu" (fallback, slow)
     "device": "cuda",
+    # CTranslate2 quantization. "" picks the per-device default below; set it
+    # explicitly to A/B a different one (bench.py measures this). INT8 is the
+    # clear win on CPU, but on Ampere GPUs plain float16 is often as fast or
+    # faster than int8_float16 and keeps more accuracy, so it is worth measuring
+    # rather than assuming. A GPU-only value here is NOT carried over to the CPU
+    # fallback (see CPU_COMPUTE_TYPES); an outright invalid one makes the model
+    # load fail, which is logged and leaves dictation unavailable until fixed.
+    "compute_type": "",
     "rms_threshold": 0.003,
     # weak mics record faint audio Whisper reads as silence. Quiet clips are
     # scaled up toward target_rms before transcription; max_gain caps the boost
     # so near-silent hiss isn't amplified into hallucinations.
     "target_rms": 0.06,
     "max_gain": 12.0,
-    "beam_size": 5,
+    # greedy decoding (beam_size 1) is roughly 2x faster than beam search, and
+    # on short push-to-talk utterances the accuracy difference is negligible.
+    # Raise it if quality matters to you more than latency.
+    "beam_size": 1,
+    # anti-hallucination guard that needs word timestamps, so it costs ~10%
+    # extra latency per segment. Turn it on if Whisper invents text over silence.
+    "hallucination_guard": False,
+    # Silero VAD: cuts the non-speech stretches out of the clip before the
+    # decoder ever sees them. Those stretches are exactly where the "дякую" /
+    # "дякую за перегляд!" hallucinations come from — this mic records at
+    # ~0.006-0.008 RMS, so almost every take gets boosted x8-x10.6 and the room
+    # noise comes up with the voice. Off by default because it must be validated
+    # on this specific quiet mic first: at low input levels Silero can score real
+    # speech as non-speech and clip the start or end of a phrase off, which is a
+    # worse failure than an occasional junk transcript the filter below catches.
+    "vad": False,
+    # Confidence-based hallucination filter (see _hallucination_reason). A short
+    # transcript is dropped only when the model was ALSO unsure of it, so a
+    # confident "так"/"добре"/"дякую" is never touched. Tunable without a code
+    # change: raise max_words to catch longer junk, lower logprob (more negative)
+    # or raise no_speech to make the filter less aggressive.
+    "hallucination_max_words": 3,
+    "hallucination_logprob": -0.8,
+    "hallucination_no_speech": 0.5,
     "overlay": True,
     # mic input device name; "" = system default
     "input_device": "",
@@ -192,28 +234,70 @@ DEFAULTS = {
     "max_utterance_s": 60,   # hard cap so a noisy mic can't record forever
     # LLM post-processing: "off" | "groq" | "ollama"
     "llm": "off",
+    # Paste the transcript the moment Whisper is done, then quietly rewrite it
+    # once the LLM answers, instead of making the user wait for the network.
+    # Measured over 984 real polish calls: p50 0.63 s, p90 1.10 s, max 3.07 s
+    # on top of a 0.43 s transcribe — i.e. the LLM was ~60% of the wait. The
+    # rewrite only fires when nothing has moved since the paste (see
+    # _schedule_llm_polish); otherwise the raw text simply stays.
+    "llm_async": True,
+    # Re-decode a Ukrainian take that came back with Russian in it. Costs one
+    # extra pass, and only on the ~2% of takes that trip the detector.
+    "ru_retry": True,
     "groq_api_key": "",
     "groq_model": "openai/gpt-oss-20b",
     "ollama_model": "qwen2.5:7b",
     "autostart": False,
 }
+# CTranslate2 compute types that actually run on a CPU. float16 is GPU-only, so
+# it must never leak onto the CPU fallback path (see _load_model_locked).
+CPU_COMPUTE_TYPES = {"int8", "int8_float32", "int8_bfloat16", "int16",
+                     "float32", "bfloat16"}
 SAMPLE_RATE = 16000
 PRE_ROLL_S = 0.5
 MIN_DURATION_S = 0.3
 LANGUAGES = ["uk", "en"]
 HOTKEY_LANG = keyboard.Key.f10
 BLOCK = 512
-# Whisper invents these on short/quiet clips (YouTube training artifacts).
-# Dropped when they are the ENTIRE transcript of a short recording.
-HALLUCINATIONS = {
-    "дякую за перегляд", "дякую за перегляд!", "субтитри створені спільнотою amara.org",
-    "продовження в наступній серії", "підпишіться на канал",
-    "thanks for watching", "thank you for watching", "you",
-}
+# Whisper invents these on quiet clips: they are residue from the YouTube
+# subtitles it was trained on, never something a person dictates into a text
+# field. Dropped whenever they are the ENTIRE transcript, at ANY duration.
+#
+# The duration gate this used to sit behind (dur < 4.0) was wrong: 13 takes of
+# "дякую за перегляд!" in the user's own history ran LONGER than 4 seconds and
+# went straight into their documents. Length says nothing about whether the clip
+# was speech — it is the boosted room noise, not the clock, that produces these.
+#
+# "you" was removed from this set. With the duration gate gone the match would
+# fire on any recording whose whole transcript is that one ordinary English word
+# — a real thing to dictate, and an unrecoverable drop if it happens. A
+# hallucinated "you" is still caught, by the confidence rule below: it is one
+# word and the model is never confident about it. A genuine, confidently spoken
+# "you" now survives, which is the whole point of splitting the two rules.
+# The list itself now lives in text_fixes, which owns both the whole-utterance
+# test above and the edge-trimmer that handles the case this set alone missed:
+# an artifact glued onto real speech ("...Покажи мені Дякую за перегляд!"), which
+# a whole-string comparison can never catch. Re-exported under the old name so
+# nothing that imports flow.HALLUCINATIONS breaks.
+#
+# Widening the set from 7 phrases to 22 reclassifies nothing in the user's 3834
+# recorded takes — verified before the switch — so it only ever affects artifacts
+# they have not happened to hit yet.
+HALLUCINATIONS = text_fixes.HALLUCINATIONS
 # Nudges Whisper toward Ukrainian tokens — kills phonetic drift into Russian
 # ("чотири п'ять" heard as "четыре пять"). Russian-only letters never appear.
 UK_INITIAL_PROMPT = "Розмова українською мовою. Привіт, як твої справи? Один, два, три, чотири, п'ять."
 RU_ONLY_CHARS = set("ыэъёЫЭЪЁ")
+# Heavier Ukrainian prime, used only for the ru_retry second pass. It is longer
+# and denser in Ukrainian-only graphemes (і, ї, є, ґ, apostrophe) than
+# UK_INITIAL_PROMPT on purpose: the first pass already had the gentle nudge and
+# drifted anyway, so the retry trades a little prompt-induced style bias for a
+# much stronger pull away from Russian tokens.
+UK_RETRY_PROMPT = (
+    "Це розмова українською мовою, без жодного російського слова. "
+    "Їхні справи, її ім'я, є ґрунт, знання, підприємство, зʼясувати. "
+    "Тести, реліз, пошта, версія, налаштування, виправлення."
+)
 # after a failed polish, stop trying for this long so a stopped Ollama or a bad
 # API key doesn't add a connection timeout to every dictation
 LLM_BACKOFF_S = 60
@@ -225,17 +309,51 @@ LLM_PROMPT = (
 # -----------------------------------------
 
 
+def _make_logger() -> "logging.Logger":
+    """Build the single file logger, once, at import.
+
+    Rotation matters here: the previous implementation appended forever and the
+    live log had grown past 23 000 lines / 1.2 MB. It also stamped only
+    %H:%M:%S, so an error from yesterday was indistinguishable from one today —
+    which actively obstructed a log audit. Dates are now included.
+
+    Failures are swallowed on purpose: if the log file is read-only or locked by
+    another process, dictation must keep working rather than crash. Note that
+    delay=True does NOT check that: it means the constructor opens nothing, so
+    the except below almost never fires and the handler is attached regardless.
+    What actually keeps a bad log path harmless is logging's own handleError
+    (which reports to stderr instead of raising) plus the guard in log()."""
+    lg = logging.getLogger("whspr")
+    lg.setLevel(logging.INFO)
+    lg.propagate = False  # never bubble up to the root handler
+    if not lg.handlers:
+        try:
+            h = logging.handlers.RotatingFileHandler(
+                LOG_PATH, maxBytes=2 * 1024 * 1024, backupCount=3,
+                encoding="utf-8", delay=True)
+            h.setFormatter(logging.Formatter(
+                "[%(asctime)s] %(message)s", datefmt="%Y-%m-%d %H:%M:%S"))
+            lg.addHandler(h)
+        except OSError:
+            pass
+    return lg
+
+
+_logger = _make_logger()
+
+
 def log(msg: str) -> None:
-    line = f"[{time.strftime('%H:%M:%S')}] {msg}"
+    # Called from the audio callback, the hotkey listener, every transcription
+    # worker and the tray thread. logging's handlers are internally locked, so
+    # concurrent lines no longer interleave the way raw open()/write() could.
     try:
-        print(line, flush=True)
+        print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}", flush=True)
     except Exception:
         pass  # pythonw has no stdout
     try:
-        with open(LOG_PATH, "a", encoding="utf-8") as f:
-            f.write(line + "\n")
-    except OSError:
-        pass
+        _logger.info("%s", msg)
+    except Exception:
+        pass  # a locked/read-only log file must never break dictation
 
 
 # Groq models that have been decommissioned: a saved config still pointing at
@@ -268,9 +386,41 @@ state = {
     "status": "loading",
     "model": None,
     "models": {},  # model name -> WhisperModel (lazy cache)
+    # set by _transcribe_impl when a take has to be boosted at (or near) the
+    # max_gain cap — i.e. the mic level is too low in Windows itself. Declared
+    # here so the UI can read it before the first dictation ever runs.
+    "mic_too_quiet": False,
+    # raw RMS of the last take, before any boost. The UI shows it next to the
+    # warning so "too quiet" is a number the user can act on, not an adjective.
+    # None until the first dictation.
+    "mic_rms": None,
 }
 chunks: list[np.ndarray] = []
 pre_roll = collections.deque(maxlen=int(PRE_ROLL_S * SAMPLE_RATE / BLOCK) + 1)
+# chunks/pre_roll are touched by three threads at once — the sounddevice audio
+# callback, the hotkey listener, and each transcription thread — so every
+# mutation goes through _buf_lock. _transcribe_lock serializes the model itself:
+# faster-whisper's WhisperModel is not thread-safe for concurrent transcribe()
+# calls on one instance.
+_buf_lock = threading.Lock()
+_transcribe_lock = threading.Lock()
+
+
+def take_audio() -> tuple[list, list]:
+    """Atomically detach the recorded audio and its pre-roll from the shared
+    buffers. Both are cleared here, so a new recording can start immediately
+    while this take is still being transcribed — and so a stale pre-roll from
+    the PREVIOUS take can never be prepended to the next one.
+
+    Must be called on the thread that ends the recording (stop_rec), never on a
+    worker spawned by it: anything later races with the next start_rec()."""
+    with _buf_lock:
+        pre, cur = list(pre_roll), chunks[:]
+        chunks.clear()
+        pre_roll.clear()
+    return pre, cur
+
+
 kb = keyboard.Controller()
 user32 = ctypes.windll.user32
 tray_icon = None
@@ -287,6 +437,43 @@ def ensure_single_instance() -> None:
 
 
 # ---------------- History (SQLite) ----------------
+# Set once the `words` column is known to exist, so the migration check below
+# runs at most once per process instead of on every _db() call.
+_schema_migrated = False
+
+
+def _migrate_word_counts(con: sqlite3.Connection) -> None:
+    """Add and backfill the per-row `words` column.
+
+    The dashboard's "words" and "wpm" are sums of len(text.split()) over the
+    whole table. Computing that in SQL is not possible without changing what a
+    word means (SQLite has no split(); the LENGTH/REPLACE trick miscounts runs
+    of spaces, tabs and newlines, all of which the LLM corrector emits), and
+    computing it in Python meant SELECTing every transcript ever recorded on
+    every UI start. Storing the count at insert time gets both: the number is
+    still exactly len(text.split()), and the dashboard becomes a pure SQL
+    aggregate that never loads a transcript.
+
+    Existing rows are backfilled once, the only time the column is missing."""
+    global _schema_migrated
+    if _schema_migrated:
+        return
+    cols = {r[1] for r in con.execute("PRAGMA table_info(history)")}
+    if "words" not in cols:
+        con.execute("ALTER TABLE history ADD COLUMN words INTEGER")
+        rows = con.execute(
+            "SELECT id, text FROM history WHERE words IS NULL").fetchall()
+        con.executemany("UPDATE history SET words=? WHERE id=?",
+                        [(len((t or "").split()), i) for i, t in rows])
+        # commit before returning: the ALTER and the backfill sit in one
+        # transaction, and if the caller never enters a `with con` block it
+        # would be rolled back at close — leaving the column gone while this
+        # process still believed it existed, so every INSERT would then fail
+        con.commit()
+        log(f"history: added word counts for {len(rows)} existing row(s)")
+    _schema_migrated = True
+
+
 def _db() -> sqlite3.Connection:
     con = sqlite3.connect(DB_PATH)
     con.execute(
@@ -294,18 +481,57 @@ def _db() -> sqlite3.Connection:
         "id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, lang TEXT, "
         "duration REAL, text TEXT)"
     )
+    # ts is the only column we filter on (the "today" counters in
+    # history_stats), and the table grows without bound, so index it.
+    con.execute("CREATE INDEX IF NOT EXISTS idx_history_ts ON history(ts)")
+    _migrate_word_counts(con)
+    # WAL: the dictation path does many small single-row INSERTs, and in the
+    # default rollback-journal mode each one rewrites the journal and blocks
+    # readers. WAL lets the UI read history while a take is being written.
+    # It is a persistent property of the file — setting it again is a no-op.
+    try:
+        con.execute("PRAGMA journal_mode=WAL")
+    except sqlite3.Error:
+        pass  # e.g. db on a network share, which cannot do WAL — plain mode is fine
     return con
 
 
-def history_add(text: str, lang: str, duration: float) -> None:
+def history_add(text: str, lang: str, duration: float) -> int | None:
+    """Store one take. Returns its rowid, or None if the write failed.
+
+    The rowid matters because the transcript is not necessarily final when it is
+    first written: with llm_async the raw text is pasted (and recorded) at once
+    and the polished version arrives a second later, so the caller needs a
+    handle to amend the row rather than insert a near-duplicate."""
     try:
         with _db() as con:
-            con.execute(
-                "INSERT INTO history (ts, lang, duration, text) VALUES (?,?,?,?)",
-                (time.strftime("%Y-%m-%d %H:%M:%S"), lang, round(duration, 1), text),
+            # words is stored, not derived: see _migrate_word_counts
+            cur = con.execute(
+                "INSERT INTO history (ts, lang, duration, text, words) "
+                "VALUES (?,?,?,?,?)",
+                (time.strftime("%Y-%m-%d %H:%M:%S"), lang, round(duration, 1),
+                 text, len(text.split())),
             )
+            return cur.lastrowid
     except sqlite3.Error as e:
         log(f"history write failed: {e}")
+        return None
+
+
+def history_update_text(row_id: int | None, text: str) -> None:
+    """Replace a stored transcript in place (async LLM polish landing late).
+
+    A no-op for a missing rowid, so the caller does not have to branch on the
+    insert having failed — losing the polished wording from the history list is
+    a cosmetic loss, and never worth an exception on the paste path."""
+    if not row_id:
+        return
+    try:
+        with _db() as con:
+            con.execute("UPDATE history SET text = ?, words = ? WHERE id = ?",
+                        (text, len(text.split()), row_id))
+    except sqlite3.Error as e:
+        log(f"history update failed: {e}")
 
 
 def history_last(n: int = 100) -> list[tuple]:
@@ -335,18 +561,35 @@ def history_clear() -> None:
 
 
 def history_stats() -> dict:
-    """Aggregate numbers for the dashboard."""
+    """Aggregate numbers for the dashboard.
+
+    Called from Api.bootstrap() on every UI start, and the table only ever
+    grows, so it must not haul the whole history into Python. Every number here
+    is a SQL aggregate: no transcript is loaded at all. Word counts come from
+    the stored `words` column, which holds exactly len(text.split()) as computed
+    at insert time (see _migrate_word_counts), so the meaning of "words" and
+    "wpm" is unchanged from when they were summed in Python.
+
+    Today's rows are found through idx_history_ts. GLOB, not LIKE: LIKE is
+    case-insensitive by default and so cannot use the index, while a prefix GLOB
+    can. On a 'YYYY-MM-DD HH:MM:SS' ts it is exactly ts.startswith(today)."""
     today = time.strftime("%Y-%m-%d")
+    total, secs, words, dictations_today, words_today = 0, 0, 0, 0, 0
     try:
         with _db() as con:
-            rows = con.execute("SELECT ts, duration, text FROM history").fetchall()
+            # duration and words can be NULL (rows written before each column
+            # existed); SUM skips NULLs and COALESCE turns the empty-table SUM
+            # into 0 — the same result the old Python generators produced
+            total, secs, words = con.execute(
+                "SELECT COUNT(*), COALESCE(SUM(duration), 0), "
+                "COALESCE(SUM(words), 0) FROM history"
+            ).fetchone()
+            dictations_today, words_today = con.execute(
+                "SELECT COUNT(*), COALESCE(SUM(words), 0) FROM history "
+                "WHERE ts GLOB ?", (today + "*",)
+            ).fetchone()
     except sqlite3.Error:
-        rows = []
-    total = len(rows)
-    words = sum(len(t.split()) for _, _, t in rows)
-    words_today = sum(len(t.split()) for ts, _, t in rows if ts.startswith(today))
-    dictations_today = sum(1 for ts, _, _ in rows if ts.startswith(today))
-    secs = sum(d for _, d, _ in rows if d)
+        pass
     # words per minute across all dictated audio time
     wpm = (words / (secs / 60)) if secs else 0
     return {
@@ -402,10 +645,26 @@ def set_autostart(enable: bool) -> None:
 
 
 # ---------------- LLM post-processing ----------------
+GROQ_KEY_ENV = "WHSPR_GROQ_API_KEY"
+
+
+def groq_key() -> str:
+    """The Groq API key: environment first, config.json second.
+
+    config.json is gitignored, but it is still a plaintext secret sitting in the
+    project folder, and it travels with any backup, support log or screen share
+    of the settings screen. The environment variable gives anyone who cares a
+    way to keep the key out of the file entirely; leaving it unset keeps the
+    existing behaviour exactly, so nothing breaks for a user who never sets it.
+
+    Never log the return value."""
+    return (os.environ.get(GROQ_KEY_ENV) or config.get("groq_api_key") or "").strip()
+
+
 def llm_available() -> bool:
     mode = config.get("llm", "off")
     if mode == "groq":
-        return bool(config.get("groq_api_key"))
+        return bool(groq_key())
     return mode == "ollama"
 
 
@@ -424,11 +683,12 @@ def _llm_request(system_prompt: str, user_text: str, label: str) -> str | None:
         # (Cloudflare error 1010) before the request ever reaches the API
         headers = {"Content-Type": "application/json", "User-Agent": HTTP_UA}
         if mode == "groq":
-            if not config.get("groq_api_key"):
+            key = groq_key()
+            if not key:
                 return None
             url = "https://api.groq.com/openai/v1/chat/completions"
             model = config.get("groq_model", DEFAULTS["groq_model"])
-            headers["Authorization"] = f"Bearer {config['groq_api_key']}"
+            headers["Authorization"] = f"Bearer {key}"
         elif mode == "ollama":
             # 127.0.0.1, not localhost: the latter resolves to ::1 first and
             # doubles the wait when nothing is listening
@@ -762,6 +1022,14 @@ def check_update() -> dict:
                       if a.get("name", "").endswith(".exe")), "")
         newer = _version_tuple(tag) > _version_tuple(APP_VERSION)
         return {"available": bool(newer and asset), "version": tag, "url": asset}
+    except urllib.error.HTTPError as e:
+        # GITHUB_REPO has no published releases yet, so /releases/latest answers
+        # 404 on every launch. That is the expected steady state, not a failure:
+        # report "no update" silently instead of filling the log with errors.
+        # Everything else (403 rate limit, 5xx, ...) is a real fault and is logged.
+        if e.code != 404:
+            log(f"update check failed (HTTPError: {e})")
+        return {"available": False, "version": "", "url": ""}
     except Exception as e:
         log(f"update check failed ({e.__class__.__name__}: {e})")
         return {"available": False, "version": "", "url": ""}
@@ -850,6 +1118,37 @@ def _icon_path() -> str:
     """whspr.ico next to the source, or inside the PyInstaller bundle."""
     base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
     return os.path.join(base, "whspr.ico")
+
+
+# Any string is valid as long as it is stable across runs; Windows uses it as the
+# identity, not as a display name.
+APP_USER_MODEL_ID = "whspr.dictation"
+
+
+def _set_app_id() -> None:
+    """Tell Windows this process is whspr, not the interpreter hosting it.
+
+    This is about IDENTITY, not about the icon: the taskbar draws whatever icon
+    the window carries (that is webview.start(icon=...) in webview_app), and this
+    call does not change that. What it fixes is grouping and pinning — run from
+    source the app is pythonw.exe, so without an explicit ID the shell files the
+    window under the interpreter, letting whspr share one taskbar button with any
+    other Python program running, and pinning it pins "pythonw".
+
+    Must run BEFORE any window is created: the shell reads the ID when the first
+    top-level window appears and does not re-read it afterwards.
+
+    Note the other half is missing — whspr.lnk carries no matching
+    System.AppUserModel.ID, because WScript.Shell (what make_shortcut.py drives)
+    cannot set one; that needs IPropertyStore via pywin32. Until it does, a
+    PINNED shortcut can show up as a button separate from the running window.
+    Frozen builds have their own exe identity, so this matters least there."""
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+            ctypes.c_wchar_p(APP_USER_MODEL_ID))
+    except Exception as e:
+        # cosmetic only — never worth failing startup over
+        log(f"app id not set ({e.__class__.__name__}: {e})")
 
 
 def tray_image(status: str):
@@ -999,17 +1298,26 @@ def _load_model_locked(name: str) -> WhisperModel:
     if name in state["models"]:
         return state["models"][name]
     ensure_tokenizer(name)
+    want = config.get("compute_type") or ""
+    # The CPU fallback must NOT blindly reuse `want`. Someone benchmarking the
+    # GPU sets compute_type to "float16", which CTranslate2 cannot run on CPU —
+    # so honouring it on the fallback path would turn "CUDA is unavailable, run
+    # slowly on the CPU" into "no dictation at all", removing the safety net
+    # exactly when it is needed. Only CPU-runnable values carry over.
+    cpu_want = want if want in CPU_COMPUTE_TYPES else "int8"
     if config.get("device") == "cpu":
-        m = _build_model(name, "cpu", "int8")
-        log(f"model {name} on CPU (forced)")
+        m = _build_model(name, "cpu", cpu_want)
+        log(f"model {name} on CPU (forced, {cpu_want})")
     else:
         try:
-            m = _build_model(name, "cuda", "int8_float16")
-            log(f"model {name} on CUDA")
+            m = _build_model(name, "cuda", want or "int8_float16")
+            log(f"model {name} on CUDA ({want or 'int8_float16'})")
         except Exception as e:
             log(f"CUDA failed ({e.__class__.__name__}: {e}), falling back to CPU")
-            m = _build_model(name, "cpu", "int8")
-            log(f"model {name} on CPU")
+            if want and cpu_want != want:
+                log(f"compute_type {want!r} is GPU-only — using {cpu_want!r} on CPU")
+            m = _build_model(name, "cpu", cpu_want)
+            log(f"model {name} on CPU ({cpu_want})")
     t0 = time.time()
     list(m.transcribe(np.zeros(SAMPLE_RATE, dtype=np.float32), language="en")[0])
     log(f"warm-up done ({time.time() - t0:.1f}s)")
@@ -1134,11 +1442,17 @@ def duck_others(mute: bool) -> None:
 
 # ---------------- Audio ----------------
 def audio_callback(indata, frames, t, status):
-    if state["recording"]:
-        chunks.append(indata.copy())
-    else:
-        pre_roll.append(indata.copy())
-    # cheap live input level for the mic meter / test
+    # keep the locked section as short as possible: this runs on the audio
+    # thread, and blocking here drops samples. Only the buffer append needs to
+    # be atomic against take_audio()/start_rec().
+    block = indata.copy()
+    with _buf_lock:
+        if state["recording"]:
+            chunks.append(block)
+        else:
+            pre_roll.append(block)
+    # cheap live input level for the mic meter / test — deliberately outside the
+    # lock: it only feeds the UI meter and need not match the buffer exactly
     try:
         state["input_level"] = float(np.sqrt(np.mean(indata.astype(np.float32) ** 2)))
     except Exception:
@@ -1246,6 +1560,15 @@ def paste_text(text: str, target_hwnd: int) -> bool:
     if old is not None:
         def restore():
             time.sleep(0.5)
+            # only put the old value back if the clipboard is still OURS. If the
+            # user copied something in that half-second window, restoring would
+            # silently destroy their copy — leaving our dictation there instead
+            # is the lesser evil, and they can always copy again.
+            try:
+                if pyperclip.paste() != text:
+                    return
+            except Exception:
+                return  # can't tell whose it is — don't gamble on the user's copy
             try:
                 pyperclip.copy(old)
             except Exception:
@@ -1372,25 +1695,268 @@ def run_voice_command(kind, payload, target_hwnd: int) -> tuple[str | None, bool
     return new, True
 
 
-def transcribe_and_paste(target_hwnd: int) -> None:
+def transcribe_and_paste(pre: list, cur: list, target_hwnd: int) -> None:
+    """Transcribe an ALREADY DETACHED take. The caller owns the detaching: it
+    must call take_audio() on the thread that stops the recording, not here.
+    Doing it here left a window where the user could press the hotkey again
+    before this worker was ever scheduled — start_rec() would then clear the
+    buffers (losing take 1) and this worker would take_audio() the half-recorded
+    take 2. By the time we get here, `pre`/`cur` belong to us alone.
+
+    The model lock is still taken here, and only here: the buffers are already
+    free (so the next recording is never blocked), and this take is still
+    transcribed in full once the GPU is free. WhisperModel is not thread-safe
+    for concurrent transcribe() calls on one instance — without this lock,
+    overlapping takes stalled each other for over a minute."""
+    if not cur:
+        # Nothing was captured: a tap shorter than one audio block (~32 ms), or
+        # the mic died between start_rec and release. The status is still
+        # "recording" from start_rec, and _transcribe_impl — the only other
+        # place that resets it — is never reached, so the tray icon and the
+        # overlay pill would stay red until the NEXT dictation. Clear it here.
+        set_status("idle")
+        return
+    with _transcribe_lock:
+        _transcribe_impl(pre, cur, target_hwnd)
+
+
+# Remembers the dictionary string we last warned about, so the "very short
+# terms" warning is printed once per distinct dictionary rather than on every
+# single dictation. Editing the dictionary in settings makes it warn again.
+_hotwords_warned_for: str | None = None
+
+
+def _build_hotwords(raw: str) -> str | None:
+    """Turn the user's comma/newline dictionary into a hotwords string.
+
+    Whatever ends up here is fed straight to the decoder as a bias, so junk in
+    the dictionary is junk pushed into every transcript. The live dictionary
+    had a trailing comma (an empty term), a malformed "Бекенді.бекенд" and a
+    typo — hence the defensive cleaning: strip surrounding whitespace and
+    punctuation, drop what is left empty, and de-duplicate case-insensitively
+    while preserving the user's order.
+
+    Terms are NOT filtered by length: "n8n" is three characters and entirely
+    legitimate. Very short terms are only warned about, never dropped — hotwords
+    match inside longer words, so "ші" biases the decoder on every "наші", but
+    it is the user's data and silently deleting it would be worse than the bias.
+    """
+    global _hotwords_warned_for
+    raw = raw or ""
+    seen, terms = set(), []
+    for t in re.split(r"[,\n]", raw):
+        # strip whitespace and any surrounding punctuation, but keep what is
+        # inside a term intact: "n8n", "Wi-Fi" and "п'ять" must survive
+        t = t.strip().strip(".,;:!?()[]{}\"'«»„“”-–—…")
+        if not t:
+            continue
+        key = t.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        terms.append(t)
+    if raw != _hotwords_warned_for:
+        _hotwords_warned_for = raw
+        short = [t for t in terms if len(t) <= 2]
+        if short:
+            log("dictionary warning: term(s) of 2 characters or fewer bias the "
+                "decoder inside longer words (e.g. \"ші\" matches in \"наші\") "
+                f"and rarely help — consider removing: {', '.join(short)}")
+    return " ".join(terms) or None
+
+
+def _segment_stats(segs: list) -> tuple[str, float, float]:
+    """Joined text plus the two confidence numbers faster-whisper exposes.
+
+    The segment generator can only be consumed once, so the caller materialises
+    it into a list and this reads that list — the joined text is byte-identical
+    to the old `" ".join(s.text.strip() for s in segments)`.
+
+    avg_logprob is averaged weighted by segment DURATION, not per segment: a
+    0.3 s "дякую" tacked onto a real 8 s sentence must not drag the mean down as
+    hard as the sentence pulls it up. no_speech_prob is taken as the MAX across
+    segments — one segment the model thinks is silence is enough to be
+    suspicious, and short takes are usually a single segment anyway."""
+    text = " ".join(s.text.strip() for s in segs).strip()
+    if not segs:
+        return text, 0.0, 0.0
+    weights = [max(float(getattr(s, "end", 0.0)) - float(getattr(s, "start", 0.0)), 0.0)
+               for s in segs]
+    logps = [float(getattr(s, "avg_logprob", 0.0) or 0.0) for s in segs]
+    total_w = sum(weights)
+    if total_w > 0:
+        avg_logprob = sum(w * lp for w, lp in zip(weights, logps)) / total_w
+    else:
+        # zero-length segments (VAD can produce them): fall back to a plain mean
+        avg_logprob = sum(logps) / len(logps)
+    no_speech = max(float(getattr(s, "no_speech_prob", 0.0) or 0.0) for s in segs)
+    return text, avg_logprob, no_speech
+
+
+def _hallucination_reason(text: str, avg_logprob: float,
+                          no_speech_prob: float) -> str | None:
+    """Why this transcript should be thrown away, or None to keep it.
+
+    Two deliberately separate rules:
+
+    1. A known non-speech artifact (HALLUCINATIONS) is never legitimate
+       dictation, so it goes at any duration and at any confidence.
+
+    2. Short AND low-confidence. Both halves are required. "дякую" is the single
+       most frequent hallucination in the user's history (15 takes) but is also
+       an ordinary word they genuinely dictate, so it cannot be blacklisted —
+       the model's own confidence is what separates the two cases. A confidently
+       decoded "так" / "добре" / "дякую" therefore passes untouched, while the
+       same word decoded out of amplified room noise (low avg_logprob or high
+       no_speech_prob) is dropped.
+
+    The returned reason carries the numbers so the log can be audited: if this
+    filter ever eats a real dictation, the line says exactly which threshold did
+    it and by how much."""
+    stripped = text.lower().strip(" .!?")
+    if not stripped:
+        return None
+    # text_fixes strips a wider set of trailing punctuation than the old
+    # inline comparison did, so "Дякую за перегляд…" with an ellipsis is now
+    # caught too. Same rule, fewer ways to slip past it.
+    if text_fixes.is_pure_artifact(text):
+        return (f"known non-speech artifact: {text!r} "
+                f"(avg_logprob={avg_logprob:.2f}, no_speech={no_speech_prob:.2f})")
+    words = len(text.split())
+    max_words = config.get("hallucination_max_words",
+                           DEFAULTS["hallucination_max_words"])
+    min_logprob = config.get("hallucination_logprob",
+                             DEFAULTS["hallucination_logprob"])
+    max_no_speech = config.get("hallucination_no_speech",
+                               DEFAULTS["hallucination_no_speech"])
+    if words <= max_words and (avg_logprob < min_logprob
+                               or no_speech_prob > max_no_speech):
+        return (f"low-confidence short output: {text!r} words={words}<={max_words}, "
+                f"avg_logprob={avg_logprob:.2f} (drop below {min_logprob}), "
+                f"no_speech={no_speech_prob:.2f} (drop above {max_no_speech})")
+    return None
+
+
+# Async LLM polish safety limits. The rewrite works by backspacing over what we
+# pasted and pasting the polished version, so its blast radius is exactly the
+# characters it deletes — every bound here exists to keep that radius small and
+# to make sure we only ever delete text we are still certain is ours.
+#
+# 400 chars: a rewrite sends one backspace per character through pynput. At ~1 ms
+# each that is 0.4 s of synthetic keystrokes, already at the edge of what feels
+# like the app glitching rather than correcting itself. Longer takes keep the raw
+# transcript, which is a correct result, just an unpolished one.
+ASYNC_REWRITE_MAX_CHARS = 400
+# 15 s: past this the user has almost certainly moved on, and last_output is no
+# longer good evidence that our text is still sitting untouched under the caret.
+ASYNC_REWRITE_WINDOW_S = 15.0
+
+
+def _schedule_llm_polish(raw: str, lang: str, target_hwnd: int,
+                         row_id: int | None) -> None:
+    """Polish an ALREADY-PASTED transcript in the background, then rewrite it.
+
+    This is the whole point of llm_async: the measured cost of the polish call
+    is p50 0.63 s / p90 1.10 s / max 3.07 s on top of a 0.43 s transcribe, so
+    waiting for it inline more than doubles the time before the user sees a
+    single character. Here they see the raw text immediately and the polished
+    wording replaces it a moment later.
+
+    Rewriting means deleting characters the user can see, so the bar for doing it
+    is deliberately high. Every one of these must still hold when the LLM answers:
+
+      * the polished text actually differs from what we pasted;
+      * it is short enough to retype without a visible storm of keystrokes;
+      * no recording or transcription is in flight — taken as the real
+        _transcribe_lock, not a flag, so a take that starts mid-check cannot
+        interleave its own keystrokes with ours;
+      * state['last_output'] is still character-for-character the text we pasted,
+        into the same window — if a later dictation, a voice command or another
+        rewrite has landed since, ours is stale;
+      * that window is still focused, and little enough time has passed that the
+        caret is plausibly where we left it.
+
+    Any failed check means no rewrite. The user keeps the raw transcript, which
+    is a correct, complete result — never a partial delete. The same is true of
+    an LLM error or timeout, which _llm_request already swallows into None."""
+    if not raw or len(raw) > ASYNC_REWRITE_MAX_CHARS:
+        return
+
+    def work():
+        # The network call happens OUTSIDE _transcribe_lock: holding it for up
+        # to 15 s would stall the next dictation behind a slow Groq response.
+        polished = llm_polish(raw, lang)
+        if not polished or polished == raw:
+            return
+        if len(polished) > ASYNC_REWRITE_MAX_CHARS:
+            log("async polish skipped — result too long to retype safely")
+            return
+        # non-blocking: if a dictation is already running, its keystrokes own the
+        # keyboard and ours would interleave. Skipping is the safe answer.
+        if not _transcribe_lock.acquire(blocking=False):
+            log("async polish skipped — another take is in flight")
+            return
+        try:
+            if state.get("recording"):
+                log("async polish skipped — recording again")
+                return
+            last = state.get("last_output") or {}
+            if last.get("text") != raw or last.get("hwnd") != target_hwnd:
+                log("async polish skipped — output no longer ours")
+                return
+            if time.time() - last.get("at", 0) > ASYNC_REWRITE_WINDOW_S:
+                log("async polish skipped — too late to rewrite safely")
+                return
+            if target_hwnd and user32.GetForegroundWindow() != target_hwnd:
+                # deliberately NOT refocusing the way paste_text does: stealing
+                # focus back for a cosmetic cleanup would yank the user out of
+                # whatever they moved on to.
+                log("async polish skipped — window no longer focused")
+                return
+            _send_backspaces(len(raw))
+            if paste_text(polished, target_hwnd):
+                state["last_output"] = {"text": polished, "hwnd": target_hwnd,
+                                        "at": time.time()}
+                history_update_text(row_id, polished)
+                state["pill_text"] = polished
+                log(f"async polish applied: {polished!r}")
+            else:
+                # the backspaces already went through, so the old text is gone
+                # and the new one is on the clipboard — say so rather than
+                # leaving the user staring at a silently emptied field
+                state["last_output"] = {"text": polished, "hwnd": target_hwnd,
+                                        "at": time.time()}
+                history_update_text(row_id, polished)
+                log("async polish: paste failed — polished text left in clipboard")
+        except Exception as e:
+            log(f"async polish failed ({e.__class__.__name__}: {e})")
+        finally:
+            _transcribe_lock.release()
+
+    threading.Thread(target=work, daemon=True).start()
+
+
+def _transcribe_impl(pre: list, cur: list, target_hwnd: int) -> None:
     set_status("processing")
     done_msg, ok = None, True
     try:
-        if not chunks:
-            return
         # measure what the user actually said, separately from the pre-roll:
-        # in mic-on-demand mode the stream is closed between recordings, so
-        # pre_roll is empty and a combined threshold would silently swallow
-        # every phrase shorter than MIN_DURATION_S + PRE_ROLL_S
-        spoken = sum(len(c) for c in chunks) / SAMPLE_RATE
-        audio = np.concatenate(list(pre_roll) + chunks).flatten().astype(np.float32)
-        chunks.clear()
+        # the pre-roll is up to PRE_ROLL_S of audio captured *before* the key
+        # press, so a combined threshold would silently swallow every phrase
+        # shorter than MIN_DURATION_S + PRE_ROLL_S
+        spoken = sum(len(c) for c in cur) / SAMPLE_RATE
+        audio = np.concatenate(pre + cur).flatten().astype(np.float32)
         dur = len(audio) / SAMPLE_RATE
         if spoken < MIN_DURATION_S:
             return
-        # cheap silence gate instead of Silero VAD: onnxruntime import hangs
-        # for minutes on this machine, and push-to-talk audio has speech anyway
+        # Cheap whole-clip silence gate. It runs regardless of the "vad" setting
+        # because it answers a different question: Silero decides WHICH PARTS of
+        # a clip are speech, this decides whether the clip is worth decoding at
+        # all, and it costs one numpy pass instead of a neural net.
         rms = float(np.sqrt(np.mean(audio**2)))
+        # published for the UI alongside mic_too_quiet: the warning is only
+        # actionable if the user can see the number it is complaining about
+        state["mic_rms"] = rms
         log(f"level rms={rms:.4f} (threshold {config['rms_threshold']})")
         if rms < config["rms_threshold"]:
             log(f"skipped: too quiet (rms={rms:.4f})")
@@ -1401,13 +1967,29 @@ def transcribe_and_paste(target_hwnd: int) -> None:
         # Scale up to a healthy target so quiet speech transcribes. Cap the gain
         # so a near-silent clip of pure hiss isn't blown up into hallucinations.
         target_rms = config.get("target_rms", 0.06)
+        max_gain = config.get("max_gain", 12.0)
         if 0 < rms < target_rms:
-            gain = min(target_rms / rms, config.get("max_gain", 12.0))
+            gain = min(target_rms / rms, max_gain)
             audio = np.clip(audio * gain, -1.0, 1.0)
             log(f"boosted x{gain:.1f} -> rms {float(np.sqrt(np.mean(audio**2))):.4f}")
-        hotwords = " ".join(
-            t.strip() for t in re.split(r"[,\n]", config.get("dictionary", "")) if t.strip()
-        ) or None
+            # A take that lands at (or near) the gain cap means the mic itself is
+            # recording far too quietly — measured ~0.006-0.008 RMS on this
+            # machine, i.e. pinned at x8-x10.6 on every single take. At that
+            # point we are amplifying room noise as much as speech, and Whisper
+            # answers with hallucinated filler. No amount of code fixes this;
+            # the input level has to be raised in Windows sound settings, so say
+            # so, and flag it in state so the UI can surface it later.
+            state["mic_too_quiet"] = gain >= max_gain * 0.8
+            if state["mic_too_quiet"]:
+                log("WARNING: microphone input level is far too low "
+                    f"(rms={rms:.4f}, boost pinned at x{gain:.1f} of max "
+                    f"x{max_gain:.1f}). Raise the mic level in Windows sound "
+                    "settings — heavy boost amplifies noise and causes "
+                    "hallucinated text.")
+        else:
+            # loud enough to need no boost at all — clear any earlier warning
+            state["mic_too_quiet"] = False
+        hotwords = _build_hotwords(config.get("dictionary", ""))
         t0 = time.time()
         # auto language: let Whisper detect instead of the manual F10 choice.
         # Detection needs the multilingual stock model and no Ukrainian prompt
@@ -1421,40 +2003,124 @@ def transcribe_and_paste(target_hwnd: int) -> None:
             model = model_for(lang)
             tr_lang = lang
             initial_prompt = UK_INITIAL_PROMPT if lang == "uk" else None
-        segments, info = model.transcribe(
-            audio, language=tr_lang, vad_filter=False,
-            beam_size=config["beam_size"], hotwords=hotwords,
-            initial_prompt=initial_prompt,
-            condition_on_previous_text=False,
-            # anti-hallucination guards that are OFF by default in faster-whisper.
-            # The temperature fallback and compression/no-speech thresholds are
-            # already on by default; these three are the ones that were not:
-            #   no_repeat_ngram_size — blocks "4 4 4 4 4" / "піп піп піп" loops
-            #   repetition_penalty   — discourages the model repeating itself
-            #   hallucination_silence_threshold — drops text invented over gaps
-            #   (needs word_timestamps to locate those silent spans)
-            no_repeat_ngram_size=3,
-            repetition_penalty=1.1,
-            word_timestamps=True,
-            hallucination_silence_threshold=2.0,
-        )
+        # hallucination_silence_threshold drops text invented over silent gaps,
+        # but it can only find those gaps with word_timestamps, and that forced
+        # alignment pass costs ~5-10% extra latency per segment. Push-to-talk
+        # clips rarely contain long silences, so the guard is opt-in.
+        guard = {}
+        if config.get("hallucination_guard", False):
+            guard = {"word_timestamps": True, "hallucination_silence_threshold": 2.0}
+        # vad_filter is a config key, not a constant. The old comment here
+        # claimed Silero was off because onnxruntime "hangs for minutes on this
+        # machine"; that is no longer true — measured on this machine,
+        # onnxruntime imports in 0.3 s, faster_whisper.vad loads in 0.24 s and
+        # get_speech_timestamps runs in 138 ms on an 8 s clip, i.e. it is cheap.
+        # The real reason it stays off by default is accuracy, not speed: see
+        # the "vad" entry in DEFAULTS. No vad_parameters are passed — the
+        # faster-whisper defaults are sensible and there is no measurement here
+        # justifying anything else.
+        def _decode(prompt, temperature=None):
+            """One decode pass. Returns (info, text, avg_logprob, no_speech).
+
+            Factored out only so the Russian-drift retry below can run the exact
+            same configuration with one knob changed — every parameter here is
+            the single source of truth for both passes."""
+            kw = dict(
+                language=tr_lang, vad_filter=config.get("vad", False),
+                beam_size=config["beam_size"], hotwords=hotwords,
+                initial_prompt=prompt,
+                condition_on_previous_text=False,
+                # anti-hallucination guards that are OFF by default in
+                # faster-whisper and cost nothing, so they stay on
+                # unconditionally. The temperature fallback and
+                # compression/no-speech thresholds are already on:
+                #   no_repeat_ngram_size — blocks "4 4 4 4 4" / "піп піп" loops
+                #   repetition_penalty   — discourages the model repeating itself
+                no_repeat_ngram_size=3,
+                repetition_penalty=1.1,
+                **guard,
+            )
+            if temperature is not None:
+                kw["temperature"] = temperature
+            segments, inf = model.transcribe(audio, **kw)
+            # materialise the generator once: the text and the two confidence
+            # numbers the filter needs all come from the same single pass
+            segs = list(segments)
+            return (inf,) + _segment_stats(segs)
+
+        info, text, avg_logprob, no_speech_prob = _decode(initial_prompt)
         if auto:
             # keep the detected language if it's one we support, else stay put
             lang = info.language if info.language in LANGUAGES else LANGUAGES[state["lang"]]
             state["lang"] = LANGUAGES.index(lang)
-        text = " ".join(s.text.strip() for s in segments).strip()
         ru = "".join(sorted(set(text) & RU_ONLY_CHARS))
         log(f"{dur:.1f}s audio -> {time.time() - t0:.2f}s transcribe [{lang}]"
-            f"{' RU-chars:' + ru if ru else ''}: {text!r}")
+            f"{' RU-chars:' + ru if ru else ''}: {text!r} "
+            f"(avg_logprob={avg_logprob:.2f}, no_speech={no_speech_prob:.2f})")
+        # Russian drift. 2.0% of this user's 3822 takes came back with Russian in
+        # them ("Тесты", "Релиз", "пошты") — the model phonetically slipping
+        # language, not the user switching. RU_ONLY_CHARS is an exact test with
+        # no false positives: those four letters do not exist in Ukrainian, so
+        # seeing one in a take the user asked to be Ukrainian is proof of drift.
+        # Re-decode with a heavier Ukrainian prompt and the temperature fallback
+        # pinned off (the fallback is often what produced the drift), then keep
+        # whichever pass looks less Russian. Costs one extra ~0.4 s pass on the
+        # 2% of takes that trip it, and never runs in auto-language mode, where
+        # Russian may be exactly what the user is speaking.
+        # text_fixes.looks_russian subsumes the RU_ONLY_CHARS test (a
+        # Russian-only letter alone already scores above the threshold) and adds
+        # Russian function words that contain no such letter — "что", "нужно",
+        # "потому" would otherwise sail through. Measured: 31 of the user's 3834
+        # takes trip it, all genuinely Russian, none false.
+        if (text and lang == "uk" and not auto
+                and config.get("ru_retry", True)
+                and text_fixes.looks_russian(text)):
+            try:
+                t1 = time.time()
+                _, r_text, r_lp, r_ns = _decode(UK_RETRY_PROMPT, temperature=0.0)
+                r_ru = "".join(sorted(set(r_text) & RU_ONLY_CHARS))
+                log(f"ru-retry {time.time() - t1:.2f}s: {r_text!r} "
+                    f"(RU-chars:{r_ru or '-'}, avg_logprob={r_lp:.2f})")
+                # Accept only a strict improvement, scored the same way the
+                # trigger is. Deliberately NOT the distinct-letter sets `ru` /
+                # `r_ru` that the log line carries: "Тесты и релизы" and "Тесты
+                # і релізи" both reduce to the single letter "ы", so comparing
+                # those sets would reject a retry that fixed half the Russian in
+                # the take. An empty or equally-Russian retry must never replace
+                # a transcript the user can still fix by hand; ties go to the
+                # first pass.
+                if r_text and text_fixes.ru_score(r_text) < text_fixes.ru_score(text):
+                    text, avg_logprob, no_speech_prob, ru = r_text, r_lp, r_ns, r_ru
+                    log("ru-retry accepted")
+            except Exception as e:
+                log(f"ru-retry failed ({e.__class__.__name__}: {e}) — keeping first pass")
         if not text:
+            # also the normal outcome when vad_filter is on and Silero judged the
+            # whole clip non-speech: `segments` is then empty and there is
+            # nothing to paste, which is exactly what this path already handled
             done_msg, ok = "порожньо", False
             return
-        if dur < 4.0 and text.lower().strip(" .!?") in {
-            h.strip(" .!?") for h in HALLUCINATIONS
-        }:
-            log("dropped as hallucination")
+        reason = _hallucination_reason(text, avg_logprob, no_speech_prob)
+        if reason:
+            log(f"dropped as hallucination — {reason}")
             done_msg, ok = "не розчув", False
             return
+        # The take survived the whole-utterance filter, so it is real speech —
+        # but Whisper may still have tacked a subtitle artifact onto the end of
+        # it ("...Покажи мені Дякую за перегляд!"). Trim the edges only; a
+        # matching phrase in the MIDDLE of a sentence is far likelier to be
+        # something the user actually said. Runs before the command match so a
+        # command with an artifact stuck to it still matches its trigger.
+        text, removed = text_fixes.trim_artifacts(text)
+        if removed:
+            log(f"trimmed artifact(s) {removed} -> {text!r}")
+        # NOTE on ordering: the filter runs BEFORE match_voice_command, and every
+        # voice-command trigger is 1-3 words ("стерти", "капсом", "видали це"),
+        # so an unconfidently decoded command is dropped rather than executed.
+        # That is deliberate, not an oversight: "видали останнє" sends real
+        # backspaces over the user's text, and acting on a command the model was
+        # unsure it heard is worse than making the user repeat it. Moving this
+        # check after the command match would trade that safety for convenience.
         # a whole-utterance command edits the previous dictation instead of
         # typing new text; checked before normalization so triggers match cleanly
         cmd = match_voice_command(text)
@@ -1466,10 +2132,28 @@ def transcribe_and_paste(target_hwnd: int) -> None:
         # marks instead of spelled-out numbers and dictated "кома"/"крапка"
         text = normalize_numbers(text)
         text = apply_spoken_punctuation(text)
-        text = llm_polish(text, lang)
+        # Restore dictionary terms the decoder transliterated. hotwords only
+        # bias the decoder — in Ukrainian mode a Latin brand still comes back as
+        # "віспор флоу", and no decoding parameter fixes that. Measured over the
+        # user's 3834 recorded takes with their real dictionary: 50 takes (1.3%)
+        # changed, every one of them a genuine term. See test_text_fixes.py for
+        # the anti-corruption suite that keeps it that conservative.
+        text, restored = text_fixes.restore_terms(text, config.get("dictionary", ""))
+        if restored:
+            log(f"dictionary restored: {restored}")
+        # Sync vs async LLM (see the llm_async note in DEFAULTS). Sync keeps the
+        # original ordering, where the LLM sees normalised digits and marks and
+        # the replacement/capitalisation passes run over its answer. Async skips
+        # it here, pastes the deterministic result immediately, and lets
+        # _schedule_llm_polish rewrite it in place once the network answers — so
+        # the LLM sees the fully normalised text instead, which is if anything
+        # the friendlier input.
+        polish_async = config.get("llm_async", True) and llm_available()
+        if not polish_async:
+            text = llm_polish(text, lang)
         text = apply_replacements(text)
         text = capitalize_sentences(text)
-        history_add(text, lang, dur)
+        row_id = history_add(text, lang, dur)
         pasted = paste_text(text, target_hwnd)
         done_msg, ok = (text, True) if pasted else ("фокус втрачено — текст у буфері", False)
         state["pill_text"] = text
@@ -1477,6 +2161,8 @@ def transcribe_and_paste(target_hwnd: int) -> None:
         # remember what we typed and where, so a follow-up voice command can edit it
         if pasted:
             state["last_output"] = {"text": text, "hwnd": target_hwnd, "at": time.time()}
+            if polish_async:
+                _schedule_llm_polish(text, lang, target_hwnd, row_id)
     finally:
         set_status("idle")
         if overlay is not None and config.get("overlay", True):
@@ -1570,7 +2256,11 @@ def start_listener() -> "_Listeners":
             if state["stream"] is None:
                 log("cannot record: no input device")
                 return
-        chunks.clear()
+        # drop anything left from an aborted take, but KEEP pre_roll: it holds
+        # the audio captured just before this key press, which is the point of
+        # it. A take still transcribing has already detached its own copy.
+        with _buf_lock:
+            chunks.clear()
         state["recording"] = True
         duck_others(True)
         set_status("recording")
@@ -1583,8 +2273,16 @@ def start_listener() -> "_Listeners":
         # restore playback now: no reason to keep other apps silent through
         # transcription, which runs on its own thread below
         duck_others(False)
+        # Detach the audio HERE, on the listener thread, while recording is
+        # provably over and start_rec() cannot yet have run again. If we left
+        # this to the worker thread, the gap between spawning it and the OS
+        # scheduling it is enough for the user to press the hotkey again:
+        # start_rec() would clear `chunks` (destroying THIS take) and the worker
+        # would then wake up and steal the next take's half-recorded audio.
+        pre, cur = take_audio()
         hwnd = user32.GetForegroundWindow()
-        threading.Thread(target=transcribe_and_paste, args=(hwnd,), daemon=True).start()
+        threading.Thread(target=transcribe_and_paste, args=(pre, cur, hwnd),
+                         daemon=True).start()
         if config.get("mic_on_demand"):
             close_stream()
 
@@ -1697,6 +2395,15 @@ class _Listeners:
             except Exception:
                 pass
 
+    def join(self):
+        """Block until the listeners exit. Headless mode (--no-ui) has no
+        mainloop to park the main thread in, so it joins here instead."""
+        for l in self._listeners:
+            try:
+                l.join()
+            except Exception:
+                pass
+
 
 def restart_listener() -> None:
     """Apply a changed hotkey without restarting the whole app."""
@@ -1759,6 +2466,10 @@ def capture_hotkey(on_done) -> None:
 class AppContext:
     """Bridge passed to the GUI: config + data + actions, no GUI deps here."""
     config = config
+    # exposed so the GUI can fall back to the real default of a setting instead
+    # of repeating the literal in its own code — a duplicated beam_size fallback
+    # of 5 survived in app_gui long after DEFAULTS had moved to 1
+    DEFAULTS = DEFAULTS
     LANGUAGES = LANGUAGES
     UK_MODELS = UK_MODELS
     MODELS = MODELS
@@ -1881,6 +2592,15 @@ def _start_core() -> None:
 def main() -> None:
     global overlay
     ensure_single_instance()
+    # Give mic_level our logger so its COM failures land in whspr.log like
+    # everything else. Optional module: a build without it just loses the
+    # "raise the mic level" button, never the ability to dictate.
+    try:
+        import mic_level
+        mic_level.set_logger(log)
+    except Exception as e:
+        log(f"mic_level unavailable ({e.__class__.__name__}: {e})")
+    _set_app_id()
     mode = _mode()
 
     if mode == "web":

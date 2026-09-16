@@ -2,6 +2,8 @@
 # left sidebar nav + content pages (Dashboard / History / Dictionary / Settings).
 # Fully decoupled from flow.py via a `ctx` object of callbacks/values.
 
+import os
+import sys
 import time
 import customtkinter as ctk
 
@@ -47,7 +49,15 @@ class WhsprApp:
         r.minsize(760, 520)
         r.configure(fg_color=BG)
         try:
-            r.iconbitmap("whspr.ico")
+            # Resolved, not relative: "whspr.ico" only worked when the process
+            # happened to be started from the repo root, and never worked in a
+            # frozen build, where the file lives in sys._MEIPASS. Same defect
+            # that left the taskbar showing the interpreter's icon.
+            # Deliberately not importing flow._icon_path — this module is
+            # decoupled from flow by design (see the header comment).
+            base = getattr(sys, "_MEIPASS",
+                           os.path.dirname(os.path.abspath(__file__)))
+            r.iconbitmap(os.path.join(base, "whspr.ico"))
         except Exception:
             pass
         # close (X) hides to tray instead of quitting
@@ -281,6 +291,11 @@ class WhsprApp:
         body = ctk.CTkScrollableFrame(f, fg_color=BG)
         body.pack(fill="both", expand=True, padx=22, pady=(0, 12))
         c = self.ctx.config
+        # fall back to the app's real defaults instead of re-typing the literals
+        # here: a hardcoded beam_size of 5 lived on in this file long after
+        # flow.DEFAULTS had moved to 1, so the settings page offered a value the
+        # engine was not actually using. Reading DEFAULTS keeps them in step.
+        d = self.ctx.DEFAULTS
 
         def row_widget(label, widget):
             r = ctk.CTkFrame(body, fg_color=CARD, corner_radius=10)
@@ -291,7 +306,7 @@ class WhsprApp:
             return r
 
         # dictation hotkey: capture any key/combo
-        self.s_hotkey = c.get("hotkey", "f9")
+        self.s_hotkey = c.get("hotkey", d["hotkey"])
 
         def hotkey_row(r):
             self.hotkey_btn = ctk.CTkButton(
@@ -301,7 +316,7 @@ class WhsprApp:
             self.hotkey_btn.pack(side="right", padx=14)
         row_widget("Клавіша диктовки (тримати)", hotkey_row)
 
-        self.s_lang_hotkey = c.get("lang_hotkey", "f10")
+        self.s_lang_hotkey = c.get("lang_hotkey", d["lang_hotkey"])
 
         def lang_hk_row(r):
             self.lang_hk_btn = ctk.CTkButton(
@@ -311,39 +326,39 @@ class WhsprApp:
             self.lang_hk_btn.pack(side="right", padx=14)
         row_widget("Клавіша зміни мови (натиснути)", lang_hk_row)
 
-        self.s_lang = ctk.StringVar(value=c.get("language", "uk"))
+        self.s_lang = ctk.StringVar(value=c.get("language", d["language"]))
         row_widget("Мова за замовчуванням", lambda r: ctk.CTkOptionMenu(
             r, variable=self.s_lang, values=list(self.ctx.LANGUAGES), width=160,
             fg_color="#33333f", button_color="#33333f").pack(side="right", padx=14))
 
-        self.s_model = ctk.StringVar(value=c.get("model_uk", "stock"))
+        self.s_model = ctk.StringVar(value=c.get("model_uk", d["model_uk"]))
         row_widget("Модель для української", lambda r: ctk.CTkOptionMenu(
             r, variable=self.s_model, values=list(self.ctx.UK_MODELS), width=160,
             fg_color="#33333f", button_color="#33333f").pack(side="right", padx=14))
 
-        self.s_llm = ctk.StringVar(value=c.get("llm", "off"))
+        self.s_llm = ctk.StringVar(value=c.get("llm", d["llm"]))
         row_widget("LLM-постобробка", lambda r: ctk.CTkOptionMenu(
             r, variable=self.s_llm, values=["off", "groq", "ollama"], width=160,
             fg_color="#33333f", button_color="#33333f").pack(side="right", padx=14))
 
-        self.s_groq = ctk.StringVar(value=c.get("groq_api_key", ""))
+        self.s_groq = ctk.StringVar(value=c.get("groq_api_key", d["groq_api_key"]))
         row_widget("Groq API key", lambda r: ctk.CTkEntry(
             r, textvariable=self.s_groq, width=200, show="•").pack(side="right", padx=14))
 
-        self.s_beam = ctk.StringVar(value=str(c.get("beam_size", 5)))
+        self.s_beam = ctk.StringVar(value=str(c.get("beam_size", d["beam_size"])))
         row_widget("Beam size (якість↑ швидкість↓)", lambda r: ctk.CTkOptionMenu(
             r, variable=self.s_beam, values=[str(i) for i in range(1, 11)], width=160,
             fg_color="#33333f", button_color="#33333f").pack(side="right", padx=14))
 
-        self.s_rms = ctk.StringVar(value=str(c.get("rms_threshold", 0.003)))
+        self.s_rms = ctk.StringVar(value=str(c.get("rms_threshold", d["rms_threshold"])))
         row_widget("Поріг тиші (RMS)", lambda r: ctk.CTkEntry(
             r, textvariable=self.s_rms, width=160).pack(side="right", padx=14))
 
-        self.s_overlay = ctk.BooleanVar(value=c.get("overlay", True))
+        self.s_overlay = ctk.BooleanVar(value=c.get("overlay", d["overlay"]))
         row_widget("Індикатор на екрані", lambda r: ctk.CTkSwitch(
             r, text="", variable=self.s_overlay, progress_color=ACCENT).pack(side="right", padx=14))
 
-        self.s_autostart = ctk.BooleanVar(value=c.get("autostart", False))
+        self.s_autostart = ctk.BooleanVar(value=c.get("autostart", d["autostart"]))
         row_widget("Запускати з Windows", lambda r: ctk.CTkSwitch(
             r, text="", variable=self.s_autostart, progress_color=ACCENT).pack(side="right", padx=14))
 
@@ -374,17 +389,18 @@ class WhsprApp:
 
     def _save_settings(self):
         c = self.ctx.config
+        d = self.ctx.DEFAULTS  # see _page_settings: never duplicate a default here
         try:
             rms = float(self.s_rms.get().replace(",", "."))
         except ValueError:
-            rms = 0.003
+            rms = d["rms_threshold"]
         # don't switch to a model that isn't downloaded — the next dictation
         # would otherwise block on a synchronous multi-GB pull under the model
         # lock. Keep the current model and warn instead.
         sel_model = self.s_model.get()
         repo = self.ctx.UK_MODELS.get(sel_model)
         if repo and not self.ctx.model_installed(repo):
-            sel_model = c.get("model_uk", "stock")
+            sel_model = c.get("model_uk", d["model_uk"])
             self.s_model.set(sel_model)
             self._flash(self.set_saved, "Модель не завантажена")
         c.update({

@@ -15,7 +15,12 @@ ROOT = os.path.dirname(SPECPATH)  # spec lives in packaging/, code in repo root
 datas = [(os.path.join(ROOT, "web"), "web"), (os.path.join(ROOT, "whspr.ico"), ".")]
 binaries = []
 hiddenimports = ["comtypes", "pystray._win32", "cuda_setup", "webview_app",
-                 "ui", "licensing", "pycaw", "pycaw.pycaw"]
+                 "ui", "licensing", "pycaw", "pycaw.pycaw",
+                 # text_fixes is a plain top-level import in flow.py and would be
+                 # found anyway; mic_level is imported lazily inside main(), so
+                 # static analysis misses it and the packaged build would silently
+                 # lose the "raise the mic level" button. Both listed explicitly.
+                 "text_fixes", "mic_level"]
 
 # pull in data files / dylibs / submodules for the tricky native packages
 for pkg in ("webview", "ctranslate2", "faster_whisper", "sounddevice",

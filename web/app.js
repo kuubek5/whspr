@@ -11,9 +11,13 @@ const state = {
   license: { licensed: true, daysLeft: 0, exp: "", reason: "ok", customer: "" },
   stats: { wordsToday: 0, dictations: 0, wordsTotal: 0, wpm: 0 },
   recent: [], history: [],
+  // quiet-mic warning. micWarnDismissed is session-only by design: a mic that is
+  // still too quiet next launch must say so again, so it never goes to config.
+  micWarn: { quiet: false, rms: null, canFix: false, level: null },
+  micWarnDismissed: false, micWarnFixed: false, micWarnMsg: null,
   settings: { autostart: true, floatingPanel: true, sound: false, autoLang: true,
               model: "uk-ft", gpuDevice: "RTX 4070", device: "cuda", inputDevice: "", micOnDemand: false,
-              muteOthers: true,
+              muteOthers: true, vad: false,
               llm: "off", groqKey: "", groqModel: "", ollamaModel: "",
               groqKeyVisible: false, spokenPunctuation: true, normalizeNumbers: true,
               voiceCommands: true, handsFree: false },
@@ -91,6 +95,9 @@ function mock(method, args) {
   if (method === "get_download") return { active: false };
   if (method === "get_input_level") return 0.02 + Math.random() * 0.06;
   if (method === "mic_test") return true;
+  if (method === "get_mic_warning") return { quiet: false, rms: null, canFix: false, level: null };
+  if (method === "fix_mic_level") return { ok: true, before: 0.14, after: 0.85,
+    changed: true, reason: "Рівень мікрофона піднято з 14% до 85%." };
   if (method === "check_update") return { available: false, version: "", url: "" };
   if (method === "get_license") return state.license;
   if (method === "activate_license") return { ok: true, licensed: true, daysLeft: 30, exp: "2026-08-11", reason: "ok" };
@@ -115,21 +122,32 @@ async function boot() {
 }
 
 // ---- download progress ----
-async function pollDownload() {
-  setInterval(async () => {
-    const box = document.getElementById("dlProgress");
-    if (!box) return;
-    const d = await api("get_download");
-    if (d && d.active) {
-      const bar = box.querySelector(".dl-fill");
-      const txt = box.querySelector(".dl-text");
-      if (d.pct != null) { bar.classList.remove("indet"); bar.style.width = d.pct + "%"; }
-      else bar.classList.add("indet");
-      const size = d.totalMb ? `${d.mb} / ${d.totalMb} МБ` : (d.mb ? `${d.mb} МБ` : "");
-      txt.textContent = [d.label, size].filter(Boolean).join(" · ");
-      box.style.display = "block";
-    } else box.style.display = "none";
-  }, 500);
+async function tickDownload() {
+  const box = document.getElementById("dlProgress");
+  if (!box) return;
+  const d = await api("get_download");
+  if (d && d.active) {
+    const bar = box.querySelector(".dl-fill");
+    const txt = box.querySelector(".dl-text");
+    // scaleX, not width — see .dl-fill in index.html. The inline transform must
+    // be cleared when handing the bar back to the indeterminate sweep, or it
+    // would sit on top of the keyframes' own transform.
+    if (d.pct != null) {
+      bar.classList.remove("indet");
+      bar.style.transform = `scaleX(${Math.max(0, Math.min(1, d.pct / 100))})`;
+    } else {
+      bar.classList.add("indet");
+      bar.style.transform = "";
+    }
+    const size = d.totalMb ? `${d.mb} / ${d.totalMb} МБ` : (d.mb ? `${d.mb} МБ` : "");
+    txt.textContent = [d.label, size].filter(Boolean).join(" · ");
+    box.style.display = "block";
+  } else box.style.display = "none";
+}
+function pollDownload() {
+  // window hidden = closed to tray; the WebView2 process lives on, so skip the
+  // bridge call instead of hammering Python 2x/s to paint nothing
+  setInterval(() => { if (document.hidden) return; tickDownload(); }, 500);
 }
 
 // ---- model library ----
@@ -224,7 +242,7 @@ let micTestPeak = 0;
 async function toggleMicTest(btn) {
   if (micTestTimer) {
     stopMicTest(); btn.textContent = "Перевірити"; btn.classList.remove("active");
-    const f = document.getElementById("levelFill"); if (f) f.style.width = "0";
+    const f = document.getElementById("levelFill"); if (f) f.style.transform = "scaleX(0)";
     const hint = document.getElementById("micHint"); if (hint) hint.textContent = "";
     return;
   }
@@ -234,7 +252,9 @@ async function toggleMicTest(btn) {
     const lvl = await api("get_input_level");
     micTestPeak = Math.max(micTestPeak, lvl);
     const f = document.getElementById("levelFill");
-    if (f) { f.style.width = Math.min(100, (lvl / 0.1) * 100) + "%";
+    // scaleX, not width: this repaints ~10x/s while Whisper is on the GPU, and a
+    // transform stays on the compositor instead of forcing a layout every frame
+    if (f) { f.style.transform = `scaleX(${Math.min(1, lvl / 0.1)})`;
              f.style.background = lvl > 0.02 ? "var(--green)" : "var(--accent)"; }
     const hint = document.getElementById("micHint");
     if (hint) hint.textContent = micTestPeak > 0.02
@@ -296,6 +316,7 @@ const esc = (s) => (s || "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&l
 // ---- HOME ----
 function renderHome(el) {
   el.innerHTML = `
+    <div id="micWarnSlot"></div>
     ${state.update.available ? `<div class="update-banner">
       <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"></path><polyline points="21 3 21 9 15 9"></polyline></svg>
       Доступне оновлення v${esc(state.update.version)}
@@ -305,7 +326,7 @@ function renderHome(el) {
       <div class="preview-row">
         <button class="preview-btn" data-s="idle">Очікування</button>
         <button class="preview-btn" data-s="recording">Запис</button>
-        <button class="preview-btn" data-s="transcribing">Розпізнавання</button>
+        <button class="preview-btn" data-s="processing">Розпізнавання</button>
       </div>
     </div>
     <div class="stats-grid">
@@ -323,6 +344,8 @@ function renderHome(el) {
     state.manualHoldUntil = Date.now() + 6000;  // let the manual preview stay ~6s
     setHomeState(b.dataset.s);
   });
+  micWarnKey = null;  // fresh slot node — force a paint into it
+  renderMicWarning();
   renderHero(); countUpStats();
   el.querySelectorAll(".preview-btn").forEach((b) => b.classList.toggle("active", b.dataset.s === state.homeState));
   const ub = el.querySelector("#updBtn");
@@ -332,6 +355,82 @@ function statTile(label, key) {
   return `<div class="stat-tile"><div class="stat-label">${label}</div><div class="stat-value mono" data-stat="${key}">0</div></div>`;
 }
 const isLicensed = () => state.license && state.license.licensed;
+
+// ---- quiet mic warning ----
+// flow.py raises mic_too_quiet when its software boost pins at the ceiling: that
+// take amplified room noise as much as speech, which is where the hallucinated
+// text and one-word transcripts come from. Say it out loud instead of only in
+// the log, and offer the one fix that actually works (the Windows input level).
+// When the Windows slider is already at the top and the signal is still weak,
+// raising it is a no-op — the remaining headroom sits in the driver's separate
+// "Microphone Boost", or the mic is simply too far away. Say that instead of
+// offering a button that answers "уже достатньо гучний" and leaves the user stuck.
+const MIC_FALLBACK = "Гучність мікрофона вже на максимумі, але сигнал слабкий. "
+  + "Перевірте «Підсилення мікрофона» (Microphone Boost) у драйвері звуку "
+  + "(Звук → Ввід → Властивості → Рівні) або підсуньте мікрофон ближче.";
+const WARN_ICON = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>';
+let micWarnKey = null;
+function renderMicWarning() {
+  const slot = document.getElementById("micWarnSlot");
+  if (!slot) return;  // not on Home
+  const w = state.micWarn || {};
+  const show = !!w.quiet && !state.micWarnDismissed && !state.micWarnFixed;
+  // repaint only when something the banner shows actually changed — the poll
+  // must not rebuild the node under the user's cursor mid-click
+  const key = show ? `${w.rms}|${w.canFix}|${w.level}|${state.micWarnMsg}` : "";
+  if (key === micWarnKey) return;
+  micWarnKey = key;
+  if (!show) { slot.innerHTML = ""; return; }
+  // rms lands only after a measured take, and mic_level is optional — degrade
+  // to plain advice rather than promising a button that cannot exist
+  const lvl = typeof w.rms === "number" ? ` Рівень сигналу — ${w.rms.toFixed(4)}.` : "";
+  const atMax = typeof w.level === "number" && w.level >= 0.9;
+  const canFix = !!w.canFix && !atMax;
+  const advice = atMax ? " " + MIC_FALLBACK
+    : (canFix ? "" : " Підніміть гучність мікрофона у Windows: Звук → Ввід → Властивості → Рівні.");
+  const body = state.micWarnMsg
+    || `Звук підсилюється програмно до межі — це додає шум і спричиняє помилки розпізнавання.${lvl}${advice}`;
+  slot.innerHTML = `<div class="warn-banner">
+    ${WARN_ICON}
+    <div class="wb-text">
+      <div class="wb-title">Мікрофон записує надто тихо</div>
+      <div class="wb-body" id="micWarnBody">${esc(body)}</div>
+    </div>
+    ${canFix && !state.micWarnMsg ? `<button class="wb-btn" id="micFixBtn">Підняти рівень</button>` : ""}
+    <button class="wb-x" id="micWarnX" title="Приховати">✕</button>
+  </div>`;
+  slot.querySelector("#micWarnX").onclick = () => {
+    state.micWarnDismissed = true; renderMicWarning();
+  };
+  const fix = slot.querySelector("#micFixBtn");
+  if (fix) fix.onclick = () => fixMicLevel(fix);
+}
+
+async function fixMicLevel(btn) {
+  btn.disabled = true; btn.textContent = "Піднімаю…";
+  const r = (await api("fix_mic_level")) || {};
+  const reason = r.reason || "Не вдалося змінити гучність мікрофона.";
+  // ok but nothing changed = the slider was already up and the signal is still
+  // weak. That is not "solved"; keep the banner and hand over the real next step.
+  state.micWarnMsg = (r.ok && !r.changed) ? `${reason} ${MIC_FALLBACK}` : reason;
+  renderMicWarning();
+  // mic_too_quiet only clears on the next take, so close the banner ourselves —
+  // after a beat, so the user gets to read what the fix actually did
+  if (r.ok && r.changed) setTimeout(() => {
+    state.micWarnFixed = true; renderMicWarning();
+  }, 2800);
+}
+
+async function tickMicWarning() {
+  const w = await api("get_mic_warning");
+  if (!w) return;
+  state.micWarn = w;
+  // a take that no longer needs heavy boost means the fix took: forget the
+  // result text and re-arm the banner in case the mic drifts quiet again.
+  // An explicit ✕ is not re-armed — that one is the user's call for the session.
+  if (!w.quiet) { state.micWarnMsg = null; state.micWarnFixed = false; }
+  renderMicWarning();
+}
 
 function renderHero() {
   const h = document.getElementById("heroCenter");
@@ -358,7 +457,7 @@ function renderHero() {
     h.innerHTML = `<div class="rec-timer mono">${fmtTime(state.recordSecs)}</div>
       <div class="wave-row">${waveBars(40)}</div>
       <div class="rec-label"><span class="rec-dot"></span>Запис · відпустіть ${esc(state.hotkey)}, щоб завершити</div>`;
-  } else {
+  } else {  // "processing" — the remaining status flow.py sends, and a safe fallback
     h.innerHTML = `<div class="shimmer" style="width:220px"></div>
       <div class="shimmer" style="width:140px"></div>
       <div class="transcribing-label">Розпізнаю мовлення на GPU…</div>`;
@@ -518,7 +617,8 @@ function renderSettings(el) {
         <select class="select" id="selMic"></select>
       </div>
       ${toggleRow("Відкривати мікрофон лише під час запису", "Прибирає значок мікрофона в треї; можливе зрізання перших мілісекунд фрази", "micOnDemand", true)}
-      ${toggleRow("Глушити інші звуки під час запису", "Музика, відео та сповіщення стихають, поки ви диктуєте, і вмикаються назад після відпускання клавіші", "muteOthers", true)}
+      ${toggleRow("Глушити інші звуки під час запису", "Музика, відео та сповіщення стихають, поки ви диктуєте, і вмикаються назад після відпускання клавіші", "muteOthers")}
+      ${toggleRow("Вирізати тишу перед розпізнаванням", "Прибирає паузи, на яких Whisper вигадує текст. Якщо мікрофон тихий — може різати мовлення, тоді вимкніть.", "vad", true)}
       <div class="mic-test">
         <button class="preview-btn" id="micTestBtn">Перевірити</button>
         <div class="level"><div class="level-fill" id="levelFill"></div><div class="level-thresh"></div></div>
@@ -645,13 +745,26 @@ async function captureHotkey() {
 }
 
 // ---- live status poll ----
-async function pollStatus() {
-  setInterval(async () => {
-    const st = await api("get_status");
-    if (!st || st === state.homeState) return;
-    // respect a manual preview hold; don't yank the hero away from the user
-    if (Date.now() < (state.manualHoldUntil || 0)) return;
-    if (state.page === "home") setHomeState(st);
-    else state.homeState = st;
+async function tickStatus() {
+  const st = await api("get_status");
+  if (!st || st === state.homeState) return;
+  // respect a manual preview hold; don't yank the hero away from the user
+  if (Date.now() < (state.manualHoldUntil || 0)) return;
+  if (state.page === "home") setHomeState(st);
+  else state.homeState = st;
+}
+let micWarnTicks = 0;
+function pollStatus() {
+  setInterval(() => {
+    if (document.hidden) return;
+    tickStatus();
+    // rides the status timer, but only every 4th pass (~2s): the flag changes
+    // at most once per dictation, so 2x/s would be bridge traffic for nothing
+    if (micWarnTicks++ % 4 === 0) tickMicWarning();
   }, 500);
 }
+// back from the tray: state may be minutes stale, so refresh once immediately
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) return;
+  tickStatus(); tickDownload(); tickMicWarning();
+});

@@ -67,6 +67,7 @@ class Api:
                 "inputDevice": c.get("input_device", ""),
                 "micOnDemand": c.get("mic_on_demand", False),
                 "muteOthers": c.get("mute_others", True),
+                "vad": c.get("vad", False),
                 "spokenPunctuation": c.get("spoken_punctuation", True),
                 "normalizeNumbers": c.get("normalize_numbers", True),
                 "voiceCommands": c.get("voice_commands", True),
@@ -113,6 +114,63 @@ class Api:
     def mic_test(self, on):
         return flow.mic_test(bool(on))
 
+    # mic_level is an optional sibling module: it drives the Windows audio
+    # endpoint through pycaw, which can be absent in a stripped build. Import it
+    # at call time so the app still starts — and still warns — without it.
+    @staticmethod
+    def _mic_level():
+        try:
+            import mic_level
+        except Exception:
+            return None
+        try:
+            mic_level.set_logger(flow.log)  # its diagnostics belong in whspr.log
+        except Exception:
+            pass
+        return mic_level
+
+    def get_mic_warning(self):
+        """{"quiet": bool, "rms": float|None, "canFix": bool, "level": float|None}
+        for the Home banner. flow.py sets mic_too_quiet when the software boost
+        pins at its ceiling — that mic is amplifying room noise and Whisper
+        answers with junk. `level` is the Windows capture slider (0..1): at 1.0
+        with a quiet signal the remaining headroom is in the driver's separate
+        "Microphone Boost", which Core Audio's master scalar cannot reach, so the
+        UI has to stop offering a button that would do nothing."""
+        m = self._mic_level()
+        can_fix, level = False, None
+        if m is not None:
+            try:
+                can_fix = bool(m.is_boost_available())
+                level = m.get_level()
+            except Exception:
+                can_fix, level = False, None
+        rms = flow.state.get("mic_rms")
+        return {
+            "quiet": bool(flow.state.get("mic_too_quiet", False)),
+            # None until the first take has actually been measured
+            "rms": float(rms) if isinstance(rms, (int, float)) else None,
+            "canFix": can_fix,
+            "level": float(level) if isinstance(level, (int, float)) else None,
+        }
+
+    def fix_mic_level(self):
+        """Raise the capture-endpoint volume. Returns mic_level.raise_level()'s
+        dict; without the module, a same-shaped dict telling the user where the
+        Windows slider lives, so the banner always has something to say."""
+        m = self._mic_level()
+        if m is None:
+            return {"ok": False, "changed": False,
+                    "reason": "Автоматичне підняття рівня недоступне. "
+                              "Підніміть гучність мікрофона у Windows: "
+                              "Звук → Ввід → Властивості → Рівні."}
+        try:
+            return m.raise_level()
+        except Exception as e:
+            flow.log(f"fix_mic_level failed ({e.__class__.__name__}: {e})")
+            return {"ok": False, "changed": False,
+                    "reason": "Не вдалося змінити гучність мікрофона."}
+
     def get_license(self):
         return flow.license_status()
 
@@ -135,7 +193,10 @@ class Api:
     def get_pill(self):
         import time
         st = flow.state["status"]
-        if st in ("recording", "transcribing", "loading"):
+        # These are the exact names flow.set_status() emits; anything else falls
+        # through to the "done"/"idle" pill below. Matching on a name flow.py
+        # never sends (e.g. "transcribing") silently blanks the pill mid-work.
+        if st in ("recording", "processing", "loading"):
             return {"state": st}
         if time.time() - flow.state.get("pill_done_at", 0) < 2.5:
             return {"state": "done", "text": flow.state.get("pill_text", "")}
@@ -168,6 +229,11 @@ class Api:
         c["input_device"] = s.get("inputDevice", "") or ""
         c["mic_on_demand"] = bool(s.get("micOnDemand"))
         c["mute_others"] = bool(s.get("muteOthers"))
+        # vad needs neither restart_stream() nor reload_models(): it is read from
+        # config on every transcribe() call as the vad_filter argument, so the
+        # next dictation already sees the new value. Reloading here would throw
+        # away the warm model and stall that dictation for several seconds.
+        c["vad"] = bool(s.get("vad"))
         c["spoken_punctuation"] = bool(s.get("spokenPunctuation"))
         c["normalize_numbers"] = bool(s.get("normalizeNumbers"))
         c["voice_commands"] = bool(s.get("voiceCommands"))
@@ -290,4 +356,17 @@ def run() -> None:
     # not a pywebview window: WebView2 on Windows can't render a transparent,
     # rounded, always-on-top capsule, so Tk with -transparentcolor handles it.
 
-    webview.start()
+    # icon= is what puts whspr.ico on the window, and the taskbar button draws
+    # the window's icon — without it the button fell back to pythonw.exe's, which
+    # is the generic Python icon that showed up there. create_window() has no
+    # icon parameter in pywebview 6.x; it belongs on start(). Verified by reading
+    # the pixels back off the live window: with icon= the button's bitmap matches
+    # whspr.ico, without it it does not. (The AppUserModelID set in flow.main()
+    # is a separate concern — grouping and pinning, not which icon is drawn.)
+    try:
+        webview.start(icon=flow._icon_path())
+    except TypeError:
+        # older pywebview without the icon parameter — a plain window beats no
+        # window at all
+        flow.log("pywebview build has no icon= support — window icon skipped")
+        webview.start()
