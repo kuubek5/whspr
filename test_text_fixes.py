@@ -302,5 +302,43 @@ class TestRussianDetector(unittest.TestCase):
         self.assertFalse(tf.looks_russian("Тесты", threshold=1.5))
 
 
+class PolishSafety(unittest.TestCase):
+    # real takes from the user's log where Groq answered the dictation instead
+    # of correcting it
+    def test_rejects_meta_reply(self):
+        self.assertFalse(tf.polish_is_safe(
+            "Так роби всі три",
+            "Будь ласка, надайте текст, який потрібно виправити."))
+        self.assertFalse(tf.polish_is_safe(
+            "Так роби з першого по третій",
+            "Будь ласка, надайте текст, який потрібно виправити."))
+
+    def test_rejects_english_refusal(self):
+        self.assertFalse(tf.polish_is_safe(
+            "увімкни світло", "Sure! Please provide the text you want me to fix."))
+
+    def test_keeps_ordinary_polish(self):
+        for raw, pol in [
+            ("привіт як справи", "Привіт, як справи?"),
+            ("це цікаво можеш запамятати", "Це цікаво. Можеш запам'ятати?"),
+            ("1,2,3 можеш брати в роботу", "1, 2, 3, можеш брати в роботу."),
+        ]:
+            self.assertTrue(tf.polish_is_safe(raw, pol), raw)
+
+    def test_keeps_heavy_fix_of_garbled_take(self):
+        # a badly decoded take that polish legitimately rewrites hard must NOT
+        # be mistaken for a meta-reply
+        self.assertTrue(tf.polish_is_safe(
+            "не батоне на вайс экран протюе", "Не працює на весь екран."))
+
+    def test_user_actually_dictated_the_phrase(self):
+        # if the "refusal" phrase is in the raw take too, it is the user's words
+        self.assertTrue(tf.polish_is_safe(
+            "надайте текст будь ласка", "Надайте текст, будь ласка."))
+
+    def test_empty_polish_is_unsafe(self):
+        self.assertFalse(tf.polish_is_safe("щось", ""))
+
+
 if __name__ == "__main__":
     unittest.main()

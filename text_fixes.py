@@ -544,3 +544,70 @@ def looks_russian(text: str, threshold: float = 0.15) -> bool:
     and nothing else. A missed leak, by contrast, is Russian text pasted into a
     Ukrainian document."""
     return ru_score(text) >= threshold
+
+
+# ------------------------------------------------- 5. LLM polish safety net
+
+# Assistant meta-replies the polish model emits when it mistakes a dictated
+# imperative for an instruction to itself ("Так роби всі три" -> the model asks
+# for "the text to fix"). These are never a correction of the user's speech, so
+# pasting one destroys the take. Matched as a substring on the folded text, so
+# surrounding punctuation or a leading "Звичайно," does not hide them. Kept
+# short and unambiguous — every phrase here is something a corrector says ABOUT
+# the task, never something a person dictates INTO a document.
+_POLISH_REFUSALS = (
+    # uk — "provide the text", "which text", "there is no text", "as an
+    # assistant/model", "i cannot", "please clarify"
+    "надайте текст", "надай текст", "надайте, будь ласка, текст", "який текст",
+    "немає тексту", "відсутній текст", "як асистент", "як мовна модель",
+    "не можу виконати", "уточніть", "будь ласка, уточніть", "надішліть текст",
+    # ru — same replies from a model that answered in Russian
+    "предоставьте текст", "нет текста", "как ассистент", "как языковая модель",
+    "не могу выполнить", "уточните",
+    # en
+    "provide the text", "no text", "as an assistant", "as a language model",
+    "i cannot", "i can't", "please clarify", "please provide",
+)
+
+
+def polish_is_safe(raw: str, polished: str) -> bool:
+    """True if `polished` is a plausible cleanup of `raw`, False if it looks like
+    the model answered the dictation instead of correcting it.
+
+    A corrector changes punctuation, casing and a few words; it does not replace
+    the utterance with something unrelated. Two independent rejects, both aimed
+    at the observed failure (a short imperative decoded as a command, answered
+    with a meta-reply) while staying clear of legitimate heavy fixes of garbled
+    speech:
+
+      1. A known assistant meta-reply phrase appears in `polished` but not in
+         `raw`. Precise and low-risk: these phrases are things said ABOUT the
+         task, and if the user genuinely dictated one it is already in `raw`, so
+         the "not in raw" guard leaves that case untouched.
+
+      2. `polished` shares almost no content words with `raw` AND expands it.
+         A meta-reply is both unrelated and longer; a real correction of even a
+         badly garbled take keeps most of its word stems and does not balloon.
+         Only applied when raw is short (<= 6 words), which is where the command
+         confusion happens and where a single wrong word is not enough signal to
+         trip on a legitimate fix.
+
+    On True the caller keeps `polished`; on False it keeps `raw` — never empty,
+    never the meta-reply."""
+    if not polished:
+        return False
+    rawf, polf = _fold(raw), _fold(polished)
+    for phrase in _POLISH_REFUSALS:
+        if phrase in polf and phrase not in rawf:
+            return False
+    raw_words = {w for w in (_fold(t) for t in _TOKEN_RE.findall(raw))
+                 if _IS_WORD.match(w) and any(c.isalpha() for c in w)}
+    pol_words = {w for w in (_fold(t) for t in _TOKEN_RE.findall(polished))
+                 if _IS_WORD.match(w) and any(c.isalpha() for c in w)}
+    if raw_words and len(raw_words) <= 6:
+        shared = raw_words & pol_words
+        overlap = len(shared) / len(raw_words)
+        expanded = len(pol_words) > 2 * len(raw_words)
+        if overlap < 0.34 and expanded:
+            return False
+    return True
