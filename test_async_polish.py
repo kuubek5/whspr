@@ -16,18 +16,23 @@ class AsyncPolishGuards(unittest.TestCase):
     def setUp(self):
         self.bs, self.pasted, self.updated = [], [], []
         self._orig = (flow.llm_polish, flow._send_backspaces, flow.paste_text,
-                      flow.history_update_text, flow.user32, dict(flow.state))
+                      flow.history_update_text, flow.user32, flow.log, dict(flow.state))
         flow._send_backspaces = lambda n: self.bs.append(n)
         flow.paste_text = lambda t, h: (self.pasted.append((t, h)) or True)
         flow.history_update_text = lambda r, t: self.updated.append((r, t))
         flow.user32 = FakeUser32(self.HWND)
+        # Silence flow.log for the duration of the test. Without this the worker
+        # threads write "async polish applied: 'Текст.'" into the real whspr.log,
+        # which then pollutes the production log the app is analysed from — 30 of
+        # 55 async-polish lines in one session were this test noise.
+        flow.log = lambda *a, **k: None
         flow.state["recording"] = False
         flow.config["llm"] = "groq"
         flow.config["groq_api_key"] = "x"
 
     def tearDown(self):
         (flow.llm_polish, flow._send_backspaces, flow.paste_text,
-         flow.history_update_text, flow.user32, st) = self._orig
+         flow.history_update_text, flow.user32, flow.log, st) = self._orig
         flow.state.clear(); flow.state.update(st)
 
     def run_polish(self, raw, polished, hwnd=None, at=None):
