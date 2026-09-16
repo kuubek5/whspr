@@ -4,11 +4,21 @@ __pycache__/
 *.pyc
 
 # user data — private, never commit
-config.json
+#
+# Anchored with a leading slash: an unanchored `config.json` matches that name at
+# ANY depth, which silently swallowed .impeccable/config.json — a shared config
+# that is meant to be committed. Only the app's own config at the repo root holds
+# the Groq key, so only that one needs hiding.
+/config.json
 # any backup/copy of it too - it holds the Groq API key, and a bare
 # `git add .` would otherwise stage config.json.bak
-config.json.*
+/config.json.*
+# history.db-wal and -shm are not incidental: SQLite in WAL mode keeps recently
+# written rows in the sidecar files, so they contain the dictation TEXT itself.
+# Ignoring history.db alone left the transcripts one `git add -A` from a commit.
 history.db
+history.db-wal
+history.db-shm
 whspr.log
 *.log
 
@@ -32,3 +42,7 @@ ab_result.txt
 shot_*.png
 pill_*.png
 _shot*.py
+
+# impeccable design-hook scratch. The shared config next to it (ignore rules and
+# the reasons for them) IS committed on purpose — only the cache is per-machine.
+.impeccable/hook.cache.json

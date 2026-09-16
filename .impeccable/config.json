@@ -1,0 +1,32 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "bounce-easing",
+        "value": "cubic-bezier(.34, 1.56, .64, 1)",
+        "createdAt": "2026-09-16T10:32:42.485Z",
+        "reason": "Confirmed by user: deliberate slight overshoot on the sidebar nav indicator and the settings toggle thumb"
+      },
+      {
+        "rule": "marquee",
+        "value": "*",
+        "files": [
+          "web/index.html"
+        ],
+        "createdAt": "2026-09-16T10:58:50.156Z",
+        "reason": "Confirmed by user: .dl-fill.indet is the indeterminate model-download progress sweep — it carries no content to hide"
+      },
+      {
+        "rule": "dark-glow",
+        "value": "*",
+        "files": [
+          "web/index.html"
+        ],
+        "createdAt": "2026-09-16T10:58:50.223Z",
+        "reason": "Confirmed by user: 6px halo on .gpu-dot, a literal status LED, not a decorative card halo"
+      }
+    ]
+  }
+}
