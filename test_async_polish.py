@@ -22,7 +22,7 @@ class AsyncPolishGuards(unittest.TestCase):
         flow.history_update_text = lambda r, t: self.updated.append((r, t))
         flow.user32 = FakeUser32(self.HWND)
         # Silence flow.log for the duration of the test. Without this the worker
-        # threads write "async polish applied: 'Текст.'" into the real whspr.log,
+        # threads write "async polish applied: 'Текст.'" into the real kuubwave.log,
         # which then pollutes the production log the app is analysed from — 30 of
         # 55 async-polish lines in one session were this test noise.
         flow.log = lambda *a, **k: None

@@ -26,6 +26,24 @@
         ],
         "createdAt": "2026-09-16T10:58:50.223Z",
         "reason": "Confirmed by user: 6px halo on .gpu-dot, a literal status LED, not a decorative card halo"
+      },
+      {
+        "rule": "layout-transition",
+        "value": "*",
+        "files": [
+          "brand/mockups/C_tray_variants.html"
+        ],
+        "createdAt": "2026-09-16T19:27:58.682Z",
+        "reason": "Tray panel is a real OS window whose size IS the state; transform:scale would distort text. User confirmed intentional."
+      },
+      {
+        "rule": "marquee",
+        "value": "*",
+        "files": [
+          "brand/mockups/C_tray_variants.html"
+        ],
+        "createdAt": "2026-09-16T19:28:04.268Z",
+        "reason": "Live-text card sweep is an indeterminate progress indicator, not auto-scrolling content. User confirmed intentional."
       }
     ]
   }

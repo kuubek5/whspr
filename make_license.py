@@ -61,7 +61,7 @@ def issue(days: int, cust: str) -> None:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="whspr license issuer (vendor-only)")
+    ap = argparse.ArgumentParser(description="KuubWave license issuer (vendor-only)")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("genkey")
     p = sub.add_parser("issue")

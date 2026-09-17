@@ -1,4 +1,4 @@
-# bench.py — measurement harness for whspr's three open latency/quality trade-offs.
+# bench.py — measurement harness for KuubWave's three open latency/quality trade-offs.
 #
 # It answers, with numbers from THIS machine and THIS voice, three questions that
 # cannot be answered from documentation:
@@ -78,8 +78,8 @@ except Exception as exc:  # pragma: no cover - depends on the state of flow.py
 
 from faster_whisper import WhisperModel
 
-# Importing flow attaches ITS RotatingFileHandler to whspr.log — the same file a
-# running whspr instance already holds open. RotatingFileHandler is not safe
+# Importing flow attaches ITS RotatingFileHandler to kuubwave.log — the same file a
+# running KuubWave instance already holds open. RotatingFileHandler is not safe
 # across processes: if the log crosses its 2 MB limit while a benchmark runs,
 # both processes try to rename it at once and one of them loses its output (on
 # Windows the rename simply fails). Benchmarking while the app is in the tray is
@@ -219,7 +219,7 @@ def record_clip(seconds: float, out_path: str) -> str:
     the beam/compute/word-timestamp verdict meaningful for them."""
     import sounddevice as sd
     # Record from the SAME device the app dictates through, not the system
-    # default. With a headset selected in whspr's settings while Windows still
+    # default. With a headset selected in KuubWave's settings while Windows still
     # defaults to a built-in array mic, a default-device clip would measure
     # hardware the user never dictates with — and the RMS, the boost factor and
     # the whole quality verdict would describe the wrong microphone.
@@ -353,7 +353,7 @@ def norm(text: str) -> str:
 def main() -> int:
     ap = argparse.ArgumentParser(
         prog="bench.py",
-        description="Заміряє beam_size, compute_type і word_timestamps для whspr "
+        description="Заміряє beam_size, compute_type і word_timestamps для KuubWave "
                     "на реальних аргументах гарячого шляху flow.py.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="Приклади:\n"

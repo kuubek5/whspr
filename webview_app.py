@@ -59,6 +59,13 @@ class Api:
             "settings": {
                 "autostart": c.get("autostart", False),
                 "floatingPanel": c.get("overlay", True),
+                # placement is either a preset name or {"x","y"} in percent of
+                # the free space on each axis; ui.parse_position owns the
+                # meaning of both shapes, so it travels to the UI untouched
+                "overlayPosition": c.get("overlay_position", "bottom-center"),
+                # "pill" | "orb" | "dock" — ui.StatusOverlay owns the meaning
+                "overlayStyle": c.get("overlay_style", "pill"),
+                "overlayScale": c.get("overlay_scale", 100),
                 "sound": c.get("sound", False),
                 "autoLang": c.get("auto_lang", False),
                 "model": c.get("model_uk", "stock"),
@@ -77,6 +84,11 @@ class Api:
                 "groqModel": c.get("groq_model", ""),
                 "ollamaModel": c.get("ollama_model", ""),
                 "groqKeyVisible": False,
+                # admin-editable corrector instruction; blank means the UI shows
+                # (and the app uses) the shipped default, exposed alongside so
+                # the settings page can prefill it and offer a reset
+                "llmPrompt": c.get("llm_prompt", ""),
+                "llmPromptDefault": flow.LLM_PROMPT,
             },
             "devices": flow.list_input_devices(),
             "models": flow.models_status(),
@@ -220,6 +232,32 @@ class Api:
         old_device = c.get("device", "cuda")
         c["autostart"] = bool(s.get("autostart"))
         c["overlay"] = bool(s.get("floatingPanel"))
+        old_pill = (c.get("overlay_position"), c.get("overlay_scale"),
+                    c.get("overlay_style"))
+        # overlay style: exactly one of the three shapes the overlay can draw;
+        # anything else (junk, a future name) keeps the current value rather
+        # than landing an unrenderable style in config.json
+        style = s.get("overlayStyle")
+        if style in ("pill", "orb", "dock"):
+            c["overlay_style"] = style
+        # ui.parse_position is the single source of truth for what a placement
+        # means, so only obviously unusable shapes are refused here — a bad
+        # value keeps the old one instead of landing in config.json
+        pos = s.get("overlayPosition")
+        if isinstance(pos, dict):
+            try:
+                c["overlay_position"] = {
+                    "x": min(100.0, max(0.0, float(pos.get("x", 50)))),
+                    "y": min(100.0, max(0.0, float(pos.get("y", 100)))),
+                }
+            except (TypeError, ValueError):
+                pass
+        elif isinstance(pos, str) and pos.strip():
+            c["overlay_position"] = pos.strip()
+        try:
+            c["overlay_scale"] = min(140, max(80, int(s.get("overlayScale", 100))))
+        except (TypeError, ValueError):
+            pass
         c["sound"] = bool(s.get("sound"))
         c["auto_lang"] = bool(s.get("autoLang"))
         # model_uk is deliberately not touched here: activate_model() owns it.
@@ -245,8 +283,17 @@ class Api:
         c["groq_api_key"] = s.get("groqKey", "") or ""
         c["groq_model"] = s.get("groqModel", "") or flow.DEFAULTS["groq_model"]
         c["ollama_model"] = s.get("ollamaModel", "") or flow.DEFAULTS["ollama_model"]
+        # blank (or exactly the default) stores "" so the built-in prompt — and
+        # its future improvements — keep applying; a real edit is stored verbatim
+        prompt = (s.get("llmPrompt") or "").strip()
+        c["llm_prompt"] = "" if prompt == flow.LLM_PROMPT.strip() else prompt
         flow.save_config(c)
         flow.set_autostart(c["autostart"])
+        # the pill bakes size and placement in when it is built, so it only
+        # moves if we rebuild it — and only bother when those two actually changed
+        if (c.get("overlay_position"), c.get("overlay_scale"),
+                c.get("overlay_style")) != old_pill:
+            flow.apply_overlay_config()
         if c["input_device"] != old_dev or c["mic_on_demand"] != old_mode:
             flow.restart_stream()
         if c["device"] != old_device:
@@ -327,9 +374,13 @@ def run() -> None:
     """Create the native window(s) and start the webview loop (blocks)."""
     api = Api()
     window = webview.create_window(
-        "whspr", os.path.join(WEB_DIR, "index.html"),
-        js_api=api, width=980, height=660, min_size=(880, 600),
-        background_color="#0E0E12",
+        "KuubWave", os.path.join(WEB_DIR, "index.html"),
+        # the Soft Studio layout (216px sidebar + roomy content) is cramped at
+        # the old compact size; this opens comfortably on a 1080p screen while
+        # min_size still lets it shrink. background matches the dark plateau the
+        # UI paints, so there is no near-black flash before the page loads.
+        js_api=api, width=1200, height=820, min_size=(900, 640),
+        background_color="#171319",
     )
     flow.state["webview_window"] = window
 
@@ -356,12 +407,12 @@ def run() -> None:
     # not a pywebview window: WebView2 on Windows can't render a transparent,
     # rounded, always-on-top capsule, so Tk with -transparentcolor handles it.
 
-    # icon= is what puts whspr.ico on the window, and the taskbar button draws
+    # icon= is what puts kuubwave.ico on the window, and the taskbar button draws
     # the window's icon — without it the button fell back to pythonw.exe's, which
     # is the generic Python icon that showed up there. create_window() has no
     # icon parameter in pywebview 6.x; it belongs on start(). Verified by reading
     # the pixels back off the live window: with icon= the button's bitmap matches
-    # whspr.ico, without it it does not. (The AppUserModelID set in flow.main()
+    # kuubwave.ico, without it it does not. (The AppUserModelID set in flow.main()
     # is a separate concern — grouping and pinning, not which icon is drawn.)
     try:
         webview.start(icon=flow._icon_path())

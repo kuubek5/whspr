@@ -1,18 +1,18 @@
-# whspr.spec — PyInstaller one-folder build.
+# kuubwave.spec — PyInstaller one-folder build.
 #
 # Deliberately does NOT bundle the nvidia CUDA libraries (excludes=['nvidia'])
 # or any HuggingFace model. Those are fetched at first run (see cuda_setup.py
 # and faster-whisper's auto-download), keeping the installer small.
 #
 # Build from the repo root:
-#   .venv\Scripts\pyinstaller packaging\whspr.spec --noconfirm
+#   .venv\Scripts\pyinstaller packaging\kuubwave.spec --noconfirm
 
 import os
 from PyInstaller.utils.hooks import collect_all
 
 ROOT = os.path.dirname(SPECPATH)  # spec lives in packaging/, code in repo root
 
-datas = [(os.path.join(ROOT, "web"), "web"), (os.path.join(ROOT, "whspr.ico"), ".")]
+datas = [(os.path.join(ROOT, "web"), "web"), (os.path.join(ROOT, "kuubwave.ico"), ".")]
 binaries = []
 hiddenimports = ["comtypes", "pystray._win32", "cuda_setup", "webview_app",
                  "ui", "licensing", "pycaw", "pycaw.pycaw",
@@ -51,13 +51,13 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name="whspr",
+    name="KuubWave",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
     console=False,          # windowed app, no console
-    icon=os.path.join(ROOT, "whspr.ico"),
+    icon=os.path.join(ROOT, "kuubwave.ico"),
 )
 coll = COLLECT(
     exe,
@@ -65,5 +65,5 @@ coll = COLLECT(
     a.datas,
     strip=False,
     upx=False,
-    name="whspr",
+    name="KuubWave",
 )

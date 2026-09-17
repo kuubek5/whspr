@@ -1,4 +1,4 @@
-# make_shortcut.py — create whspr.lnk pointing at this checkout, using the
+# make_shortcut.py — create KuubWave.lnk pointing at this checkout, using the
 # venv's pythonw (no console window). Paths are resolved relative to this file,
 # so the shortcut works wherever the repo is cloned.
 import os
@@ -8,8 +8,8 @@ import sys
 BASE = os.path.dirname(os.path.abspath(__file__))
 pythonw = os.path.join(BASE, ".venv", "Scripts", "pythonw.exe")
 target_py = os.path.join(BASE, "flow.py")
-icon = os.path.join(BASE, "whspr.ico")
-lnk = os.path.join(BASE, "whspr.lnk")
+icon = os.path.join(BASE, "kuubwave.ico")
+lnk = os.path.join(BASE, "KuubWave.lnk")
 
 if not os.path.isfile(pythonw):
     sys.exit(f"venv not found at {pythonw} — create it first (see README).")
@@ -21,7 +21,7 @@ lnk.TargetPath = "{pythonw}"
 lnk.Arguments = """{target_py}"""
 lnk.WorkingDirectory = "{BASE}"
 lnk.IconLocation = "{icon}"
-lnk.Description = "whspr — голосова диктовка"
+lnk.Description = "KuubWave — голосова диктовка"
 lnk.Save
 '''
 vbs_path = os.path.join(BASE, "_mk.vbs")

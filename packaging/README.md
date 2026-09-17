@@ -1,4 +1,4 @@
-# Building the whspr installer
+# Building the KuubWave installer
 
 Produces a small (~270 MB) per-user Windows installer. The heavy parts —
 the recognition model and (on NVIDIA machines) the CUDA runtime — are
@@ -19,11 +19,11 @@ downloaded on first launch, so the installer stays lean and works on any
 From the repo root:
 
 ```powershell
-# 1. freeze the app -> dist\whspr\  (one folder, ~270 MB)
-.venv\Scripts\pyinstaller packaging\whspr.spec --noconfirm --distpath dist --workpath build
+# 1. freeze the app -> dist\KuubWave\  (one folder, ~270 MB)
+.venv\Scripts\pyinstaller packaging\kuubwave.spec --noconfirm --distpath dist --workpath build
 
-# 2. package -> packaging\Output\whspr-setup.exe
-& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging\whspr.iss
+# 2. package -> packaging\Output\kuubwave-setup.exe
+& "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging\kuubwave.iss
 ```
 
 Or run `packaging\build.ps1` which does both.
@@ -38,19 +38,19 @@ Or run `packaging\build.ps1` which does both.
 | CUDA cuBLAS/cuDNN (~0.9 GB) | | ✅ PyPI, **only if NVIDIA GPU** |
 
 - No GPU → runs on CPU automatically (slower, no download).
-- All runtime data lives in `%LOCALAPPDATA%\whspr` (config, history, log,
+- All runtime data lives in `%LOCALAPPDATA%\KuubWave` (config, history, log,
   `models\`, `cuda\`). Program files stay read-only.
 
 ## First-run notes
 
 - First launch needs internet to pull the model (and CUDA on NVIDIA PCs).
-  Progress is written to `%LOCALAPPDATA%\whspr\whspr.log`.
+  Progress is written to `%LOCALAPPDATA%\KuubWave\kuubwave.log`.
 - WebView2 runtime is required; it is preinstalled on current Windows 10/11.
   If missing, install the Evergreen runtime from Microsoft.
 
 ## Licensing (offline monthly keys)
 
-whspr uses offline Ed25519-signed license keys. The app ships only the public
+KuubWave uses offline Ed25519-signed license keys. The app ships only the public
 key (`licensing.py`); keys can be issued solely with your private key.
 
 **One-time setup** (already done if `keys\whspr_ed25519.pem` exists):
@@ -87,5 +87,5 @@ Notes:
   provides cuDNN 9.1.0.70 (pinned to avoid SM86 kernel recompilation). Confirm
   the pinned copy wins on the DLL search path (it is prepended via
   `add_dll_directory`). If first GPU transcribe stalls for minutes, remove the
-  bundled `dist\whspr\_internal\ctranslate2\cudnn64_9.dll`.
+  bundled `dist\KuubWave\_internal\ctranslate2\cudnn64_9.dll`.
 - Tray icon, floating pill, and dictation end-to-end.

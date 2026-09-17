@@ -22,7 +22,7 @@
 | `flow.py` | ядро: аудіо, модель, хоткеї, вставка, пайплайн, трей, `AppContext` |
 | `app_gui.py` | головне вікно (customtkinter), відв'язане через `AppContext` |
 | `ui.py` | плаваюча пігулка-індикатор (чистий tkinter, потокобезпечна) |
-| `make_shortcut.py` | генератор `whspr.lnk` |
+| `make_shortcut.py` | генератор `KuubWave.lnk` |
 
 `AppContext` — міст: GUI не знає про внутрішній стан ядра, лише кличе методи
 (`status()`, `history_stats()`, `capture_hotkey()`, `save_config()`…). Статус
@@ -73,5 +73,5 @@ Toolkit не потрібен.
 |---|---|
 | `config.json` | налаштування |
 | `history.db` | SQLite: усі диктовки (час, мова, тривалість, текст) |
-| `whspr.log` | лог подій (для pythonw без консолі) |
+| `kuubwave.log` | лог подій (для pythonw без консолі) |
 | `~/.cache/huggingface/` | ваги моделі |

@@ -19,8 +19,8 @@
 
 ### 1. Клон репозиторію
 ```powershell
-git clone https://github.com/kuubek5/whspr.git
-cd whspr
+git clone https://github.com/kuubek5/kuubwave.git
+cd kuubwave
 ```
 
 ### 2. Віртуальне середовище
@@ -43,7 +43,7 @@ CUDA-бібліотеки (`nvidia-cublas-cu12`, `nvidia-cudnn-cu12`) з pip-к�
 ```powershell
 .venv\Scripts\python make_shortcut.py
 ```
-Створює `whspr.lnk` (запуск через `pythonw` — без чорного консольного вікна).
+Створює `KuubWave.lnk` (запуск через `pythonw` — без чорного консольного вікна).
 Скопіюй його куди зручно (робочий стіл, Start Menu).
 
 ### 5. Перший запуск
@@ -64,4 +64,4 @@ CUDA-бібліотеки (`nvidia-cublas-cu12`, `nvidia-cudnn-cu12`) з pip-к�
 ## Автозапуск із Windows
 
 Увімкни в **Налаштування → Запускати з Windows** (копіює ярлик у Startup-папку),
-або вручну поклади `whspr.lnk` у `shell:startup`.
+або вручну поклади `KuubWave.lnk` у `shell:startup`.

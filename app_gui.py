@@ -25,7 +25,7 @@ STATUS_UK = {
 }
 
 
-class WhsprApp:
+class KuubWaveApp:
     """Main application window. `ctx` provides all data + actions:
     ctx.config, ctx.save_config(cfg), ctx.history_last(n), ctx.history_delete(id),
     ctx.history_clear(), ctx.history_stats(), ctx.status()->str, ctx.lang()->str,
@@ -44,12 +44,12 @@ class WhsprApp:
     # ---------- window ----------
     def _build(self):
         r = self.root
-        r.title("whspr")
+        r.title("KuubWave")
         r.geometry("860x580")
         r.minsize(760, 520)
         r.configure(fg_color=BG)
         try:
-            # Resolved, not relative: "whspr.ico" only worked when the process
+            # Resolved, not relative: "kuubwave.ico" only worked when the process
             # happened to be started from the repo root, and never worked in a
             # frozen build, where the file lives in sys._MEIPASS. Same defect
             # that left the taskbar showing the interpreter's icon.
@@ -57,7 +57,7 @@ class WhsprApp:
             # decoupled from flow by design (see the header comment).
             base = getattr(sys, "_MEIPASS",
                            os.path.dirname(os.path.abspath(__file__)))
-            r.iconbitmap(os.path.join(base, "whspr.ico"))
+            r.iconbitmap(os.path.join(base, "kuubwave.ico"))
         except Exception:
             pass
         # close (X) hides to tray instead of quitting
@@ -74,7 +74,7 @@ class WhsprApp:
         bar.grid(row=0, column=0, sticky="nsw")
         bar.grid_propagate(False)
 
-        ctk.CTkLabel(bar, text="  whspr", font=ctk.CTkFont(size=26, weight="bold"),
+        ctk.CTkLabel(bar, text="  KuubWave", font=ctk.CTkFont(size=26, weight="bold"),
                      text_color="#ffffff").pack(anchor="w", padx=18, pady=(22, 2))
         ctk.CTkLabel(bar, text="  голосова диктовка", font=ctk.CTkFont(size=12),
                      text_color=MUTED).pack(anchor="w", padx=18, pady=(0, 18))

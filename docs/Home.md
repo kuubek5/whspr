@@ -1,6 +1,6 @@
-# whspr Wiki
+# KuubWave Wiki
 
-**whspr** — локальний клон [Wispr Flow](https://wisprflow.ai) для Windows.
+**KuubWave** — локальний клон [Wispr Flow](https://wisprflow.ai) для Windows.
 Push-to-talk диктовка українською та англійською: тримаєш клавішу, говориш,
 відпускаєш — текст вставляється в активне вікно. Усе локально, на NVIDIA GPU,
 **без хмари, без підписки, офлайн**.
@@ -18,8 +18,8 @@ Push-to-talk диктовка українською та англійською
 ## Швидкий старт
 
 ```powershell
-git clone https://github.com/kuubek5/whspr.git
-cd whspr
+git clone https://github.com/kuubek5/kuubwave.git
+cd kuubwave
 python -m venv .venv
 .venv\Scripts\pip install -r requirements.txt
 .venv\Scripts\python make_shortcut.py
@@ -30,7 +30,7 @@ python -m venv .venv
 
 ## Чим відрізняється від Wispr Flow
 
-| | Wispr Flow | whspr |
+| | Wispr Flow | KuubWave |
 |---|---|---|
 | Обробка | хмара (сервери) | **локально, на твоєму GPU** |
 | Офлайн | ні | **так** (після 1-го завантаження моделі) |

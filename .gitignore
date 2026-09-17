@@ -19,7 +19,7 @@ __pycache__/
 history.db
 history.db-wal
 history.db-shm
-whspr.log
+kuubwave.log
 *.log
 
 # licensing — private signing key + issued/installed licenses. NEVER commit.
@@ -28,6 +28,9 @@ license.key
 .lastseen
 
 # generated locally (absolute paths / machine-specific)
+KuubWave.lnk
+# the pre-rename shortcut: still sitting in existing checkouts, and dropping the
+# rule would let `git add -A` stage one
 whspr.lnk
 
 # build / installer output

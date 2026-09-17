@@ -29,7 +29,7 @@ def probe(window):
 
 
 api = webview_app.Api()
-win = webview.create_window("whspr test", os.path.join(BASE, "web", "index.html"),
+win = webview.create_window("KuubWave test", os.path.join(BASE, "web", "index.html"),
                             js_api=api, width=980, height=660, background_color="#0E0E12")
 webview.start(probe, win)
 print("window closed", flush=True)

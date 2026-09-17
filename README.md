@@ -1,4 +1,4 @@
-# whspr — локальний клон Wispr Flow для Windows
+# KuubWave — локальний клон Wispr Flow для Windows
 
 Push-to-talk диктовка: тримаєш **F9** — говориш — відпускаєш — текст вставляється
 в активне вікно. **F10** перемикає мову (укр ⇄ англ). Усе локально, на GPU, без хмари.
@@ -17,8 +17,8 @@ Push-to-talk диктовка: тримаєш **F9** — говориш — ві
 
 ```powershell
 # 1. клон
-git clone https://github.com/kuubek5/whspr.git
-cd whspr
+git clone https://github.com/kuubek5/kuubwave.git
+cd kuubwave
 
 # 2. venv
 python -m venv .venv
@@ -44,8 +44,8 @@ python -m venv .venv
 
 ## Запуск
 
-Подвійний клік на **whspr.lnk** (створюється кроком 4; `pythonw` без консолі,
-лог у `whspr.log`). Або `.venv\Scripts\python flow.py`. Headless без GUI: `--no-ui`.
+Подвійний клік на **KuubWave.lnk** (створюється кроком 4; `pythonw` без консолі,
+лог у `kuubwave.log`). Або `.venv\Scripts\python flow.py`. Headless без GUI: `--no-ui`.
 
 ## UI
 
@@ -86,7 +86,7 @@ python -m venv .venv
 | `web/` | UI: `index.html` (головне вікно), `app.js` (логіка), `pill.html` (пігулка) |
 | `app_gui.py` | старий customtkinter-UI (`--classic`) |
 | `ui.py` | tkinter-пігулка для `--classic` |
-| `make_shortcut.py` | генерує `whspr.lnk` під поточний шлях |
+| `make_shortcut.py` | генерує `KuubWave.lnk` під поточний шлях |
 | `config.example.json` | шаблон конфіга (реальний `config.json` не комітиться) |
 | `test_pipeline.py` | smoke-тест: модель на CUDA транскрибує |
 | `test_e2e.py` | e2e: Windows SAPI TTS → Whisper → звірка слів |

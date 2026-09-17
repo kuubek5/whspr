@@ -1,4 +1,4 @@
-"""Pure text repairs for whspr transcripts — stdlib only, no I/O, no state.
+"""Pure text repairs for KuubWave transcripts — stdlib only, no I/O, no state.
 
 Three defects measured on the user's own 3822-dictation history live here:
 

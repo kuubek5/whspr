@@ -1,4 +1,4 @@
-# whspr — Design Prompt
+# KuubWave — Design Prompt
 
 Готовий промт для генеративних дизайн-інструментів (v0.dev, Lovable, Figma AI,
 Galileo) та візуальних (Midjourney/чат-моделі). Копіюй потрібну секцію.
@@ -13,7 +13,7 @@ Claude генерує живий інтерактивний прототип (Re
 ```
 Build me a high-fidelity, interactive prototype of a desktop app UI as a single
 React artifact (Tailwind, no external libs except lucide-react icons). The app is
-"whspr" — a local, privacy-first push-to-talk voice dictation tool for Windows;
+"KuubWave" — a local, privacy-first push-to-talk voice dictation tool for Windows;
 everything runs on the user's GPU, nothing touches the cloud. I want it to look
 like a flagship developer tool — the craft level of Linear, Raycast, Arc and
 Superhuman. Restrained, dark-first, spatial depth over decoration, one earned
@@ -71,7 +71,7 @@ glow behind the hero card», «show the light theme».
 ## 1. Основний промт (для v0 / Lovable / Figma AI / дизайн-ШІ)
 
 ```
-Design a premium desktop app UI called "whspr" — a local, privacy-first
+Design a premium desktop app UI called "KuubWave" — a local, privacy-first
 push-to-talk voice dictation tool for Windows (a self-hosted alternative to
 Wispr Flow). The whole value prop: everything runs locally on the user's GPU,
 nothing goes to the cloud. The design must feel like a flagship developer-tool
@@ -143,7 +143,7 @@ Pixel-crisp, production-grade, desktop proportions (~900×600 window).
 ## 2. Короткий візуальний промт (Midjourney / чат-моделі для мокапів)
 
 ```
-Ultra-modern desktop app UI for "whspr", a local voice-dictation tool, dark
+Ultra-modern desktop app UI for "KuubWave", a local voice-dictation tool, dark
 theme, near-black cool-tinted background (#0E0E12), layered charcoal cards with
 1px hairline borders, single warm coral accent (#F0555C) only on the recording
 state, Inter + mono typography, tabular stat numbers, thin Lucide line icons,

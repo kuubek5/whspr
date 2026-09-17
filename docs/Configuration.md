@@ -57,8 +57,8 @@
 
 ## Приклад повного config.json
 
-Див. [`config.example.json`](https://github.com/kuubek5/whspr/blob/master/config.example.json)
+Див. [`config.example.json`](https://github.com/kuubek5/kuubwave/blob/master/config.example.json)
 у репозиторії.
 
-> `config.json`, `history.db`, `whspr.log` **не потрапляють у git** (`.gitignore`)
+> `config.json`, `history.db`, `kuubwave.log` **не потрапляють у git** (`.gitignore`)
 > — вони особисті.
