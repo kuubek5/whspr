@@ -42,6 +42,10 @@ class Api:
         rows = flow.history_last(200)  # single query; recent is a slice of it
         return {
             "theme": c.get("theme", "dark"),
+            # first-run flag for the onboarding wizard. Defaults to True so a
+            # pre-existing config that predates the key is treated as already
+            # onboarded; only a fresh install (see flow.load_config) sends False.
+            "onboarded": c.get("onboarded", True),
             "version": flow.APP_VERSION,
             "license": flow.license_status(),
             "gpu": self.gpu,
@@ -53,8 +57,8 @@ class Api:
             },
             "recent": [{"time": self._pretty_time(ts), "text": text}
                        for _id, ts, lang, dur, text in rows[:4]],
-            "history": [{"id": _id, "time": ts[11:16], "lang": lang,
-                         "duration": f"{dur:.1f}с", "text": text}
+            "history": [{"id": _id, "time": ts[11:16], "day": self._day_label(ts),
+                         "lang": lang, "duration": f"{dur:.1f}с", "text": text}
                         for _id, ts, lang, dur, text in rows],
             "settings": {
                 "autostart": c.get("autostart", False),
@@ -106,6 +110,30 @@ class Api:
         if ts.startswith(today):
             return f"Сьогодні, {ts[11:16]}"
         return ts[5:16].replace("-", ".")
+
+    # Ukrainian genitive month names for the history day headers.
+    _MONTHS_UK = ("січня", "лютого", "березня", "квітня", "травня", "червня",
+                  "липня", "серпня", "вересня", "жовтня", "листопада", "грудня")
+
+    @classmethod
+    def _day_label(cls, ts):
+        """Real calendar day for a history row: 'Сьогодні' / 'Вчора' / '12 вересня'.
+
+        The list groups by this exact string, so grouping no longer has to be
+        guessed from the clock rising between rows. `ts` is 'YYYY-MM-DD HH:MM:…';
+        a malformed one just falls back to its own date slice."""
+        import datetime
+        try:
+            d = datetime.date.fromisoformat(ts[:10])
+        except (ValueError, TypeError):
+            return ts[:10]
+        today = datetime.date.today()
+        if d == today:
+            return "Сьогодні"
+        if d == today - datetime.timedelta(days=1):
+            return "Вчора"
+        label = f"{d.day} {cls._MONTHS_UK[d.month - 1]}"
+        return label if d.year == today.year else f"{label} {d.year}"
 
     # ---- live ----
     def get_status(self):
@@ -216,6 +244,16 @@ class Api:
 
     def set_theme(self, theme):
         flow.config["theme"] = theme
+        flow.save_config(flow.config)
+        return True
+
+    def finish_onboarding(self):
+        """Mark the first-run wizard as done and persist it. Called by the web UI
+        when onboarding completes (Done) or is skipped. Deliberately its own
+        method rather than an overload of save_settings: it must write the gate
+        even when the user changed no setting, and must never touch anything
+        else. Once True, bootstrap() will never send onboarded=False again."""
+        flow.config["onboarded"] = True
         flow.save_config(flow.config)
         return True
 

@@ -325,6 +325,13 @@ DEFAULTS = {
     "groq_model": "openai/gpt-oss-20b",
     "ollama_model": "qwen2.5:7b",
     "autostart": False,
+    # first-run onboarding gate. True by default on PURPOSE: an existing user
+    # whose config.json predates this key gets True (load_config copies DEFAULTS
+    # first, then overlays the saved file), so the wizard never interrupts them.
+    # Only a brand-new install — no config file at all — flips this to False in
+    # load_config(), so the wizard shows exactly once and finish_onboarding()
+    # sets it back to True.
+    "onboarded": True,
 }
 # CTranslate2 compute types that actually run on a CPU. float16 is GPU-only, so
 # it must never leak onto the CPU fallback path (see _load_model_locked).
@@ -462,13 +469,26 @@ RETIRED_GROQ_MODELS = {"llama-3.3-70b-versatile", "llama-3.1-70b-versatile",
 
 def load_config() -> dict:
     cfg = json.loads(json.dumps(DEFAULTS))  # deep copy
+    fresh_install = False
     try:
         with open(CONFIG_PATH, encoding="utf-8") as f:
             cfg.update(json.load(f))
-    except (FileNotFoundError, json.JSONDecodeError):
+    except FileNotFoundError:
+        # No config on disk = the very first launch of a brand-new install.
+        fresh_install = True
+    except json.JSONDecodeError:
+        # A corrupt config still means the app was used before; fall back to the
+        # DEFAULTS (onboarded=True) rather than replaying onboarding at them.
         pass
     if cfg.get("groq_model") in RETIRED_GROQ_MODELS:
         cfg["groq_model"] = DEFAULTS["groq_model"]
+    if fresh_install:
+        # Show the first-run wizard exactly once. Kept in memory only — not
+        # written here — so os.path.isfile(CONFIG_PATH) still reports "first run"
+        # to classic mode, and finish_onboarding()/save_settings() is what
+        # persists it (as False until completed, then True). An existing user is
+        # never touched because their file always overlays this default.
+        cfg["onboarded"] = False
     return cfg
 
 
@@ -523,6 +543,7 @@ kb = keyboard.Controller()
 user32 = ctypes.windll.user32
 tray_icon = None
 overlay = None  # StatusOverlay | None
+_last_lvl_push = 0.0  # throttle for feeding the pill's wave the live mic level
 
 
 # ---------------- Single instance ----------------
@@ -1593,7 +1614,20 @@ def audio_callback(indata, frames, t, status):
     # cheap live input level for the mic meter / test — deliberately outside the
     # lock: it only feeds the UI meter and need not match the buffer exactly
     try:
-        state["input_level"] = float(np.sqrt(np.mean(indata.astype(np.float32) ** 2)))
+        rms = float(np.sqrt(np.mean(indata.astype(np.float32) ** 2)))
+        state["input_level"] = rms
+        # Feed the recording pill's wave the real level instead of its synthetic
+        # motion. Only while recording (the pill hides otherwise), throttled to
+        # ~15 Hz so the audio thread stays cheap. This is the raw stream RMS on
+        # the audio thread — NOT the pycaw endpoint probe that crashes the bridge
+        # (see webview_app._mic_endpoint_state); different, safe path. The soft
+        # curve gives a lively wave on a quiet mic without per-machine tuning.
+        global _last_lvl_push
+        if state["recording"] and overlay is not None:
+            now = time.monotonic()
+            if now - _last_lvl_push >= 0.066:
+                _last_lvl_push = now
+                overlay.level(min(1.0, (rms / 0.05) ** 0.5))
     except Exception:
         pass
 

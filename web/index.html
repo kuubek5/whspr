@@ -107,7 +107,9 @@ body{font-family:'IBM Plex Sans',system-ui,'Segoe UI',sans-serif;background:var(
 .body{flex:1;overflow-y:auto;padding:6px 30px 34px}
 .page{animation:fadeUp .16s ease-out}
 .htitle{font-size:27px;font-weight:700;letter-spacing:-.03em;margin:4px 0 22px}
-.htitle span{color:var(--coral)}
+/* --coral-d (not --coral) so the large accent clears WCAG 3:1 large-text on the
+   light ground (2.62 -> 3.31) while staying vivid coral; identical vibe in dark. */
+.htitle span{color:var(--coral-d)}
 
 /* ---- hero ---- */
 .hero{position:relative;border-radius:26px;padding:38px 40px 32px;color:#fff;overflow:hidden;
@@ -166,7 +168,9 @@ body{font-family:'IBM Plex Sans',system-ui,'Segoe UI',sans-serif;background:var(
 /* ---- stats + recent ---- */
 .stats{display:flex;gap:38px;margin:24px 4px;flex-wrap:wrap}
 .st .n{font-size:25px;font-weight:700;letter-spacing:-.02em}
-.st .n.c{color:var(--coral)} .st .n.a{color:var(--aqua)} .st .n.v{color:var(--violet)}
+/* stat numbers are large but carry data — the -d/-ink shades clear 3:1 on the
+   light ground (coral 2.62->3.31, aqua 2.88->4.89); violet already passes (4.64) */
+.st .n.c{color:var(--coral-d)} .st .n.a{color:var(--aqua-ink)} .st .n.v{color:var(--violet)}
 .st .l{font-size:12px;color:var(--t3);margin-top:2px}
 .sechead{display:flex;align-items:center;justify-content:space-between;margin:0 4px 14px;gap:12px}
 .sechead h2{font-size:15px;font-weight:600}
@@ -232,7 +236,7 @@ body{font-family:'IBM Plex Sans',system-ui,'Segoe UI',sans-serif;background:var(
 .dhead{display:flex;align-items:center;gap:12px;margin-bottom:4px;flex-wrap:wrap}
 .dhead .di{width:40px;height:40px;border-radius:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
 .dhead .di.c{background:var(--coral-wash);color:var(--coral-ink)}
-.dhead .di.a{background:var(--aqua-wash);color:var(--aqua)}
+.dhead .di.a{background:var(--aqua-wash);color:var(--aqua-ink)}
 .dhead h2{font-size:15px;font-weight:600}
 .dhead .cnt{margin-left:auto;font-size:11.5px;font-weight:700;color:var(--coral-ink);background:var(--coral-wash);border-radius:8px;padding:3px 10px}
 .dhead .addbtn{margin-left:auto;display:inline-flex;align-items:center;gap:6px;font-family:inherit;font-size:12.5px;font-weight:600;padding:8px 13px;border-radius:11px;border:1px solid var(--line);background:var(--field);color:var(--ink);cursor:pointer;transition:.15s;white-space:nowrap}
@@ -287,7 +291,7 @@ body{font-family:'IBM Plex Sans',system-ui,'Segoe UI',sans-serif;background:var(
 .seg button.on{background:var(--card);color:var(--coral-ink);box-shadow:var(--sh-sm)}
 .seg button:not(.on):hover{color:var(--ink)}
 .note{display:flex;align-items:center;gap:10px;padding:12px 14px;border-radius:12px;font-size:12.5px;line-height:1.45}
-.note.ok{background:var(--aqua-wash);color:var(--aqua)}
+.note.ok{background:var(--aqua-wash);color:var(--aqua-ink)}
 .note.warn{background:var(--amber-wash);color:var(--amber)}
 .note.err{background:var(--danger-wash);color:var(--danger)}
 .note svg{flex-shrink:0}
@@ -323,11 +327,11 @@ body{font-family:'IBM Plex Sans',system-ui,'Segoe UI',sans-serif;background:var(
 .mcard .lab{font-size:13px;font-weight:600;margin-bottom:5px;padding-right:22px}
 .mcard.on .lab{color:var(--coral-ink)}
 .mcard .hint{font-size:11px;color:var(--t3);line-height:1.4}
-.mcard .dl{margin-top:9px;font-size:11px;font-weight:600;color:var(--aqua)}
+.mcard .dl{margin-top:9px;font-size:11px;font-weight:600;color:var(--aqua-ink)}
 .mcard .dlwrap{margin-top:10px}
 .mcard .dlbar{height:6px;border-radius:6px;background:var(--field2);overflow:hidden}
 .mcard .dlbar span{display:block;height:100%;width:100%;transform:scaleX(0);transform-origin:left;background:var(--aqua);border-radius:6px;transition:transform .22s linear}
-.mcard .dltx{margin-top:6px;font-size:11px;font-weight:600;color:var(--aqua);font-variant-numeric:tabular-nums}
+.mcard .dltx{margin-top:6px;font-size:11px;font-weight:600;color:var(--aqua-ink);font-variant-numeric:tabular-nums}
 .mcard .mdel{margin-top:10px;display:inline-flex;align-items:center;gap:5px;font-family:inherit;font-size:11px;font-weight:600;color:var(--t2);
   background:none;border:1px solid var(--line);border-radius:8px;padding:5px 9px;cursor:pointer;transition:.14s}
 .mcard .mdel:hover{color:var(--danger);border-color:var(--danger);background:var(--danger-wash)}
@@ -521,8 +525,79 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .fp-cap{margin-top:10px;font-size:12px;color:var(--t2);line-height:1.5;overflow-wrap:anywhere}
 .fp-cap b{color:var(--ink);font-weight:600}
 
+/* ===== first-run onboarding (full-surface overlay, Soft Studio) =====
+   Shown by app.js only when bootstrap reports onboarded:false — a brand-new
+   install. Adds body.ob-open which hides the normal chrome and reveals #obRoot,
+   so the wizard is the first (and only) thing a new user sees until they finish
+   or skip. Every control here is wired to the same bridge methods the matching
+   settings tab uses. */
+#obRoot{display:none}
+.ob-open .side,.ob-open .main{display:none}
+.ob-open #obRoot{display:flex;position:fixed;inset:0;z-index:150;background:var(--bg)}
+.ob-rail{width:288px;flex-shrink:0;color:#fff;padding:30px 26px;display:flex;flex-direction:column;position:relative;overflow:hidden;
+  background:#EE5348;background-image:radial-gradient(42% 62% at 15% 20%,#FF9A7B,transparent 60%),radial-gradient(46% 66% at 82% 28%,#FF5E6E,transparent 60%),radial-gradient(52% 72% at 62% 92%,#7A5CE6,transparent 55%),radial-gradient(46% 60% at 28% 82%,#FF6B5E,transparent 60%);
+  background-size:200% 200%;animation:mesh 18s ease-in-out infinite}
+.ob-rbrand{display:flex;align-items:center;gap:11px;margin-bottom:32px}
+.ob-rbrand b{font-size:18px;font-weight:700;letter-spacing:-.02em}
+.ob-steps{display:flex;flex-direction:column;gap:3px}
+.ob-step{display:flex;align-items:center;gap:13px;padding:10px 9px;border-radius:12px;transition:background .18s}
+.ob-step.on{background:rgba(255,255,255,.16)}
+.ob-step .num{width:26px;height:26px;border-radius:50%;background:rgba(20,12,16,.34);border:1px solid rgba(255,255,255,.30);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0;font-variant-numeric:tabular-nums}
+.ob-step.on .num,.ob-step.done .num{background:#fff;border-color:#fff;color:var(--coral-d)}
+.ob-step .lb{font-size:13px;font-weight:500;opacity:.85}
+.ob-step.on .lb{opacity:1;font-weight:600}
+.ob-rfoot{margin-top:auto;display:flex;align-items:center;gap:8px;font-size:11.5px;opacity:.85;padding-top:20px}
+.ob-rfoot .d{width:8px;height:8px;border-radius:50%;background:#fff;flex-shrink:0}
+.ob-main{flex:1;display:flex;flex-direction:column;min-width:0}
+.ob-body{flex:1;overflow-y:auto;display:flex;align-items:center;justify-content:center;padding:40px}
+.ob-pane{width:100%;max-width:560px;animation:fadeUp .16s ease-out}
+.ob-pane h1{font-size:30px;font-weight:700;letter-spacing:-.03em;line-height:1.12;margin-bottom:10px}
+.ob-pane h1:focus{outline:none}
+.ob-pane h1 span{color:var(--coral)}
+.ob-sub{font-size:14px;color:var(--t2);line-height:1.55;margin-bottom:26px;max-width:470px}
+.ob-feat{display:flex;gap:14px;padding:15px 0;border-top:1px solid var(--line)}
+.ob-feat:first-of-type{border-top:none}
+.ob-feat .fi{width:42px;height:42px;border-radius:12px;background:var(--coral-wash);color:var(--coral-ink);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.ob-feat .ft{font-size:14px;font-weight:600;margin-bottom:2px}
+.ob-feat .fd{font-size:12.5px;color:var(--t3);line-height:1.5}
+.ob-checkrow{display:flex;align-items:center;gap:14px;padding:16px 18px;border:1px solid var(--line);border-radius:15px;margin-bottom:11px;background:var(--field)}
+.ob-checkrow .ci{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;flex-shrink:0;background:var(--aqua-wash);color:var(--aqua-ink)}
+.ob-checkrow .ct{flex:1;min-width:0}.ob-checkrow .ck{font-size:14px;font-weight:600}.ob-checkrow .cd{font-size:12px;color:var(--t3);margin-top:2px}
+.ob-okpill{font-size:11.5px;font-weight:700;color:var(--aqua-ink);display:flex;align-items:center;gap:5px;flex-shrink:0}
+.ob-toggle{display:flex;align-items:center;gap:16px;padding:18px;border:1px solid var(--line);border-radius:15px;background:var(--field)}
+.ob-toggle .tt{flex:1;min-width:0}.ob-toggle .th2{font-size:14px;font-weight:600}.ob-toggle .td{font-size:12.5px;color:var(--t3);margin-top:3px;line-height:1.5}
+.ob-hkwrap{display:flex;align-items:center;gap:18px;padding:18px;border:1px solid var(--line);border-radius:15px;background:var(--field);flex-wrap:wrap}
+.ob-hkwrap .htx{flex:1;min-width:0}
+.ob-pane .inp{width:100%;font-family:'JetBrains Mono','Cascadia Code',Consolas,monospace}
+.ob-licalt{margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:12.5px;color:var(--t3)}
+.ob-licalt button{background:none;border:none;font-family:inherit;font-size:12.5px;color:var(--coral-ink);font-weight:600;cursor:pointer;padding:2px 4px;border-radius:6px}
+.ob-licalt button:hover{background:var(--coral-wash)}
+.mcard .ob-rec{position:absolute;top:10px;right:10px;font-size:9.5px;font-weight:700;color:var(--aqua-ink);background:var(--aqua-wash);border-radius:6px;padding:3px 7px}
+.mcard.on .ob-rec{display:none}
+.ob-done{text-align:center;display:flex;flex-direction:column;align-items:center}
+.ob-donemark{width:86px;height:86px;border-radius:24px;background:var(--coral);color:#fff;display:flex;align-items:center;justify-content:center;margin-bottom:22px;box-shadow:var(--sh-hero)}
+.ob-donekbd{display:inline-flex;align-items:center;gap:10px;font-size:16px;font-weight:600;margin-top:6px;flex-wrap:wrap;justify-content:center}
+.ob-donekbd .key{font-family:'JetBrains Mono','Cascadia Code',Consolas,monospace;font-size:13px;background:var(--field2);border-radius:9px;padding:5px 12px}
+.ob-foot{min-height:78px;border-top:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:14px;padding:14px 40px;flex-shrink:0}
+.ob-foot .lft,.ob-foot .rgt,.ob-mid{display:flex;align-items:center;gap:12px}
+.ob-dots{display:flex;gap:7px}
+.ob-dot{width:8px;height:8px;border-radius:50%;background:var(--line2);transition:.2s}
+.ob-dot.on{background:var(--coral);width:22px;border-radius:5px}
+.ob-count{font-size:12px;color:var(--t3);font-variant-numeric:tabular-nums}
+.ob-back,.ob-skip{background:none;border:none;font-family:inherit;font-size:12.5px;color:var(--t3);cursor:pointer;padding:9px 11px;border-radius:9px;min-height:40px}
+.ob-back:hover,.ob-skip:hover{color:var(--ink)}
+.ob-pane .mcards{margin-top:4px}
+@media (max-width:720px){
+  .ob-rail{display:none}
+  .ob-body{padding:26px 18px}
+  .ob-foot{padding:12px 16px;gap:8px}
+  .ob-pane h1{font-size:25px}
+  .ob-pane .mcards{grid-template-columns:1fr}
+  .ob-count{display:none}
+}
+
 @media (prefers-reduced-motion:reduce){
-  .hero,.wl,.recbtn.live,.recbtn.idle,.sk,.page,.btn.pop,.hw-chip.pop,.mcard.on .chk,
+  .hero,.wl,.recbtn.live,.recbtn.idle,.sk,.page,.ob-rail,.ob-pane,.btn.pop,.hw-chip.pop,.mcard.on .chk,
   .fp-style.on .chk,.pp-bars i,.pp-halo,.dl-fill.indet,.po-arc,.pd-bars i,.pd-dot{animation:none!important}
   .pp-bars i{transform:scaleY(.62)}
   .pp-bars i:nth-child(2n){transform:scaleY(1)}
@@ -589,6 +664,8 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   </div>
   <div class="body" id="body"></div>
 </main>
+<!-- first-run onboarding overlay; populated by app.js only on a fresh install -->
+<div id="obRoot" role="dialog" aria-modal="true" aria-label="Знайомство з KuubWave" aria-hidden="true"></div>
 <script src="app.js"></script>
 </body>
 </html>

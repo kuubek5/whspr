@@ -273,9 +273,10 @@ class _TkOverlay:
         self.root.after(0, self._hide)
 
     def level(self, value: float):
-        """Feed a 0..1 mic level to the wave. Optional: nothing calls it today
-        (mic_level is not wired up — see the NOTE in flow.main), so the wave
-        runs on its own gentle motion until a real source appears."""
+        """Feed a 0..1 mic level to the wave. flow.audio_callback pushes the live
+        stream RMS here (throttled) while recording, so the wave reflects the real
+        mic; between pushes / before the first one it falls back to gentle
+        synthetic motion."""
         try:
             self._level = min(1.0, max(0.0, float(value)))
         except (TypeError, ValueError):

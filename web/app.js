@@ -40,6 +40,9 @@ const state = {
   stats: { wordsToday: 0, dictations: 0, wordsTotal: 0, wpm: 0 },
   recent: [], history: [],
   histQuery: "", histSel: 0, settingsTab: "general",
+  // first-run onboarding. `onboarded` comes from bootstrap (defaults true, so an
+  // existing user is never interrupted); `onb` is the live wizard state or null.
+  onboarded: true, onb: null,
   // quiet-mic warning. micWarnDismissed is session-only by design: a mic that is
   // still too quiet next launch must say so again, so it never goes to config.
   micWarn: { quiet: false, rms: null, canFix: false, level: null },
@@ -97,6 +100,9 @@ function mock(method, args) {
     return { ok: true };
   }
   if (method === "bootstrap") return {
+    // Preview the first-run wizard in a plain browser by adding ?onboard to the
+    // URL; without it the mock reports an already-onboarded user (no wizard).
+    onboarded: !/[?&]onboard\b/.test(location.search),
     theme: "dark", gpu: "RTX 3070", hotkey: "Fn", version: "1.2.0",
     license: { licensed: true, daysLeft: 23, exp: "2026-08-04", reason: "ok", customer: "demo@buyer" },
     status: "idle",
@@ -108,11 +114,11 @@ function mock(method, args) {
       { time: "Вчора, 19:20", text: "нагадати купити фотополімер для друку" },
     ],
     history: [
-      { id: 5, time: "14:32", lang: "uk", duration: "3.2с", text: "зателефонувати Оксані до п'ятниці щодо звіту" },
-      { id: 4, time: "13:10", lang: "uk", duration: "2.1с", text: "додати пункт про бекапи в документацію" },
-      { id: 3, time: "11:48", lang: "uk", duration: "1.9с", text: "потрібно оновити прошивку квадрокоптера" },
-      { id: 2, time: "19:20", lang: "uk", duration: "2.4с", text: "нагадати купити фотополімер для друку" },
-      { id: 1, time: "16:05", lang: "en", duration: "3.0с", text: "schedule the standup for tomorrow morning" },
+      { id: 5, day: "Сьогодні", time: "14:32", lang: "uk", duration: "3.2с", text: "зателефонувати Оксані до п'ятниці щодо звіту" },
+      { id: 4, day: "Сьогодні", time: "13:10", lang: "uk", duration: "2.1с", text: "додати пункт про бекапи в документацію" },
+      { id: 3, day: "Сьогодні", time: "11:48", lang: "uk", duration: "1.9с", text: "потрібно оновити прошивку квадрокоптера" },
+      { id: 2, day: "Вчора", time: "19:20", lang: "uk", duration: "2.4с", text: "нагадати купити фотополімер для друку" },
+      { id: 1, day: "12 вересня", time: "16:05", lang: "en", duration: "3.0с", text: "schedule the standup for tomorrow morning" },
     ],
     settings: state.settings,
     devices: [{ name: "Мікрофон (Realtek Audio)" }, { name: "Вхід (XONAR SOUND CARD)" },
@@ -142,6 +148,7 @@ function mock(method, args) {
   if (method === "history_clear") { state.history = []; return true; }
   if (method === "history_delete" || method === "history_copy") return true;
   if (method === "capture_hotkey") return state.hotkey;
+  if (method === "finish_onboarding") { console.log("[mock] finish_onboarding"); return true; }
   return null;
 }
 
@@ -158,12 +165,18 @@ async function boot() {
   state.devices = b.devices || [];
   state.models = b.models || [];
   state.dictionary = b.dictionary; state.homeState = b.status || "idle";
+  // onboarded may legitimately be false; anything non-boolean means "assume
+  // onboarded" so a bridge that predates the flag never traps the user in a wizard
+  state.onboarded = (typeof b.onboarded === "boolean") ? b.onboarded : true;
   applyTheme();
   document.getElementById("gpuBadge").textContent = "Локально · " + state.gpu;
   const vl = document.getElementById("verLine");
   if (vl && state.version) vl.textContent = "v" + state.version;
   paintTopHint();
   renderNav(); render(); pollStatus(); pollDownload(); checkUpdate();
+  // the wizard is the first thing a brand-new install sees; the chrome is built
+  // above so Home is ready underneath the moment onboarding finishes
+  if (state.onboarded === false) openOnboarding();
 }
 window.addEventListener("pywebviewready", boot);
 document.addEventListener("DOMContentLoaded", () => { if (!hasApi()) boot(); });
@@ -564,22 +577,13 @@ function doInstallUpdate() {
 }
 
 // ================= HISTORY =================
-// Day grouping: bootstrap sends each row's clock only ("14:32"), never its date,
-// so the buckets are derived from the one signal the data does carry — rows come
-// newest-first, so a clock that RISES against the previous row means the list has
-// crossed into an earlier day. The newest bucket is labelled "Сьогодні" only when
-// recent[0] (the same query, sliced) actually says so; otherwise it stays neutral.
+// Day grouping keys off the real calendar day the bridge sends per row
+// (h.day: "Сьогодні" / "Вчора" / "12 вересня"), so buckets are exact rather
+// than guessed from the clock.
 function histFiltered() {
   const q = (state.histQuery || "").trim().toLowerCase();
   return (state.history || []).map((h, idx) => Object.assign({ _idx: idx }, h))
     .filter((h) => !q || (h.text || "").toLowerCase().includes(q));
-}
-function histDayLabel(i) {
-  if (i === 0) {
-    const r0 = (state.recent || [])[0];
-    return (r0 && /^Сьогодні/.test(r0.time || "")) ? "Сьогодні" : "Найновіші";
-  }
-  return "Раніше";
 }
 function renderHistory(el) {
   el.innerHTML = `<h1 class="htitle">Історія</h1>`;
@@ -640,12 +644,9 @@ function drawHistList(scroll) {
       <div class="et">Нічого не знайдено</div><div class="es">Спробуйте інший запит</div></div>`;
     return;
   }
-  let html = "", group = 0, prevClock = null, lastLabel = null;
+  let html = "", lastLabel = null;
   f.forEach((h, i) => {
-    const clock = h.time || "";
-    if (prevClock !== null && clock > prevClock) group++;
-    prevClock = clock;
-    const label = histDayLabel(group);
+    const label = h.day || "—";
     if (label !== lastLabel) {
       lastLabel = label;
       html += `<div class="day-head ${label === "Сьогодні" ? "today" : ""}"><span class="ddot"></span>${esc(label)}</div>`;
@@ -671,7 +672,7 @@ function drawHistDetail() {
   const active = (state.models || []).find((m) => m.active);
   const en = (h.lang || "uk").toLowerCase() === "en";
   d.innerHTML = `
-    <div class="dmeta"><span class="datechip mono">${esc(h.time)}</span>
+    <div class="dmeta"><span class="datechip mono">${esc(h.day ? h.day + ", " + h.time : h.time)}</span>
       <span class="tag ${en ? "v" : ""}">${esc((h.lang || "uk").toUpperCase())}</span><span>${esc(h.duration)}</span></div>
     <div class="dtx">${esc(h.text)}</div>
     <div class="dstats">
@@ -881,7 +882,12 @@ function renderSettings(el) {
           <button class="btn pri" id="licActivate">Активувати</button></div>
         <div class="note err" id="licError" style="margin-top:12px;display:none"></div></div>
       <div class="panel"><h2>Приватність</h2>
-        <div class="note ${s.llm === "groq" ? "warn" : "ok"}" id="privacyNote"></div></div>`,
+        <div class="note ${s.llm === "groq" ? "warn" : "ok"}" id="privacyNote"></div></div>
+      <div class="panel"><h2>Знайомство</h2>
+        <div class="srow" style="border:none;padding-bottom:0"><div style="min-width:0">
+            <div class="lab">Пройти знайомство</div>
+            <div class="hint">Показати вступний тур ще раз — крок за кроком. Не змінює ваших налаштувань.</div></div>
+          <button class="btn ghost" id="obReplay">Пройти знайомство</button></div></div>`,
   };
   el.innerHTML = `<h1 class="htitle">Налаштування</h1>
     <div class="stabs" role="tablist" aria-label="Налаштування">${STABS.map(([k, lab, ic]) =>
@@ -948,6 +954,8 @@ function renderSettings(el) {
         err.innerHTML = svg(ICON.warn, 15) + esc((res && res.error) || "Помилка активації");
       }
     };
+    const rb = el.querySelector("#obReplay");
+    if (rb) rb.onclick = () => openOnboarding();
     paintPrivacy();
   }
 }
@@ -1577,6 +1585,262 @@ function fpWidgetKey(e) {
   e.preventDefault();
   fpApplyXY(Math.max(0, Math.min(100, Math.round(x))), Math.max(0, Math.min(100, Math.round(y))));
 }
+
+// ================= FIRST-RUN ONBOARDING =================
+// A full-surface wizard shown once on a brand-new install (bootstrap
+// onboarded:false) and re-openable from Settings → Ліцензія. Every step drives
+// the SAME bridge method its matching settings control uses; leaving happens
+// only by finishing the last step or an explicit Skip, both of which persist the
+// gate through api("finish_onboarding") and drop the user on Home.
+const OB_STEPS = ["welcome", "lang", "model", "mic", "hotkey", "license", "done"];
+const OB_LABEL = { welcome: "Вітаємо", lang: "Мова", model: "Модель", mic: "Мікрофон",
+                   hotkey: "Клавіша", license: "Ліцензія", done: "Готово" };
+const OB_BRANDMARK = '<svg width="34" height="34" viewBox="0 0 100 100" fill="none" aria-hidden="true"><rect width="100" height="100" rx="26" fill="rgba(0,0,0,.22)"/><g stroke="#fff" stroke-width="8" stroke-linecap="round"><path d="M28 30v40"/><path d="M40 44v28"/><path d="M40 44c6 0 6 18 12 18"/><path d="M52 62V34"/><path d="M64 40 76 62M64 62 76 40"/></g></svg>';
+let obMicTimer = null, obMicPeak = 0;
+
+function obModelCards() {
+  const models = state.models || [];
+  if (!models.length) return `<div class="dict-empty">Список моделей недоступний</div>`;
+  return models.map((m, i) => {
+    const on = state.onb.model === m.id;
+    const rec = m.id === "uk-ft";
+    const meta = m.installed ? "на диску" : "не завантажена — завантажте у Налаштуваннях";
+    const status = m.active ? "активна" : (m.installed ? "на диску" : "не завантажена");
+    return `<div class="mcard${on ? " on" : ""}" role="radio" aria-checked="${on ? "true" : "false"}"
+      aria-label="${esc(m.label)} — ${esc(m.size)} — ${status}" tabindex="${on ? 0 : -1}" data-mid="${esc(m.id)}">
+      <div class="chk">${svg(ICON.check, 12)}</div>
+      ${rec ? `<div class="ob-rec">Радимо</div>` : ""}
+      <div class="lab">${esc(m.label)}</div>
+      <div class="hint">${esc(m.size)} · ${esc(meta)}</div></div>`;
+  }).join("");
+}
+function obPane(key) {
+  const s = state.settings;
+  if (key === "welcome") return `<h1>Вітаємо у <span>KuubWave</span></h1>
+    <div class="ob-sub">Диктування українською та англійською, що працює будь-де на екрані. Розпізнавання йде на вашому GPU — жодне слово не залишає цей компʼютер.</div>
+    <div class="ob-feat"><div class="fi">${svg(ICON.shield)}</div><div><div class="ft">Приватно й офлайн</div><div class="fd">Аудіо обробляється локально, без хмари</div></div></div>
+    <div class="ob-feat"><div class="fi">${svg(ICON.chip)}</div><div><div class="ft">Швидко на GPU</div><div class="fd">Розпізнавання за частку секунди</div></div></div>
+    <div class="ob-feat"><div class="fi">${svg(ICON.overlay)}</div><div><div class="ft">Будь-де на екрані</div><div class="fd">Затисніть клавішу — і диктуйте в будь-яке поле</div></div></div>`;
+  if (key === "lang") return `<h1>Визначення мови</h1>
+    <div class="ob-sub">KuubWave сам визначає, українською ви говорите чи англійською, і не змушує перемикатися вручну. Це можна змінити будь-коли в Налаштуваннях.</div>
+    <div class="ob-toggle">
+      <div class="tt"><div class="th2">Автоматичне визначення мови</div>
+        <div class="td">Розпізнавати українську й англійську без ручного перемикання</div></div>
+      <button class="tg ${s.autoLang ? "on" : ""}" role="switch" aria-checked="${s.autoLang ? "true" : "false"}"
+        aria-label="Автоматичне визначення мови" id="obAutoLang"><span class="th"></span></button></div>`;
+  if (key === "model") return `<h1>Оберіть модель</h1>
+    <div class="ob-sub">Більша — точніша, менша — швидша. Обрати можна лише вже завантажену модель; решту завантажите пізніше в Налаштуваннях.</div>
+    <div class="mcards" id="obMcards" role="radiogroup" aria-label="Модель розпізнавання">${obModelCards()}</div>`;
+  if (key === "mic") return `<h1>Перевірка мікрофона</h1>
+    <div class="ob-sub">Переконаймося, що мікрофон вас чує. Натисніть «Перевірити» і скажіть кілька слів.</div>
+    <div class="ob-checkrow"><div class="ci">${svg(ICON.chip)}</div>
+      <div class="ct"><div class="ck">Обробка</div><div class="cd">${esc(state.gpu)} · локально</div></div>
+      <div class="ob-okpill">${svg(ICON.check, 14)}Готово</div></div>
+    <div class="ob-checkrow"><div class="ci">${svg(ICON.mic)}</div>
+      <div class="ct"><div class="ck">Мікрофон</div><div class="cd" id="obMicHint">Натисніть «Перевірити» і скажіть кілька слів</div></div>
+      <button class="btn ghost" id="obMicBtn">Перевірити</button></div>
+    <div class="level" style="margin-top:2px"><div class="fill" id="obLvl"></div><div class="th"></div></div>`;
+  if (key === "hotkey") return `<h1>Гаряча клавіша</h1>
+    <div class="ob-sub">Утримуйте цю клавішу, щоб диктувати. Відпустіть — текст зʼявиться там, де курсор.</div>
+    <div class="ob-hkwrap"><span class="keycap" id="obCap">${esc(state.hotkey)}</span>
+      <div class="htx"><div style="font-size:13.5px;font-weight:600">Утримувати для диктування</div>
+        <div style="font-size:12px;color:var(--t3);margin-top:2px">Натисніть «Змінити» та виконайте комбінацію</div></div>
+      <button class="btn ghost" id="obHkBtn">Змінити</button></div>`;
+  if (key === "license") {
+    const l = state.license || {};
+    const note = l.licensed
+      ? `<div class="note ok">${svg(ICON.shield, 15)}Ліцензія активна${typeof l.daysLeft === "number" ? ` · залишилось ${l.daysLeft} дн.` : ""}</div>`
+      : `<div class="note warn">${svg(ICON.warn, 15)}${l.reason === "expired" ? "Ліцензію прострочено — введіть новий ключ" : "Ліцензія ще не активована"}</div>`;
+    return `<h1>Ліцензія</h1>
+      <div class="ob-sub">Введіть ключ, який ви отримали після покупки. Це не обовʼязково зараз — можна пропустити й активувати згодом у Налаштуваннях.</div>
+      ${note}
+      <input class="inp" id="obLic" style="margin-top:14px" placeholder="Вставте ключ ліцензії" aria-label="Ключ ліцензії" value="${esc(state.onb.lic || "")}">
+      <div class="note err" id="obLicErr" style="margin-top:12px;display:none"></div>
+      <div class="ob-licalt"><span>Ще не купили?</span><span>Натисніть «Пропустити», щоб продовжити без ключа.</span></div>`;
+  }
+  return `<div class="ob-done"><div class="ob-donemark">${svg(ICON.check, 44)}</div>
+    <h1>Все готово!</h1>
+    <div class="ob-sub" style="margin-bottom:8px">KuubWave працює у треї. Спробуйте прямо зараз:</div>
+    <div class="ob-donekbd">Затисніть <span class="key">${esc(state.hotkey)}</span> і говоріть</div></div>`;
+}
+function obRender() {
+  const root = document.getElementById("obRoot");
+  if (!root || !state.onb) return;
+  const i = state.onb.i, total = OB_STEPS.length, key = OB_STEPS[i];
+  root.innerHTML = `
+    <aside class="ob-rail">
+      <div class="ob-rbrand">${OB_BRANDMARK}<b>kuubwave</b></div>
+      <div class="ob-steps" role="group" aria-label="Прогрес знайомства">
+        ${OB_STEPS.map((k, idx) => `<div class="ob-step ${idx === i ? "on" : ""} ${idx < i ? "done" : ""}"${idx === i ? ' aria-current="step"' : ""}>
+          <div class="num" aria-hidden="true">${idx < i ? svg(ICON.check, 14) : (idx + 1)}</div><div class="lb">${OB_LABEL[k]}</div></div>`).join("")}
+      </div>
+      <div class="ob-rfoot"><span class="d"></span>Локально · приватно · офлайн</div>
+    </aside>
+    <div class="ob-main">
+      <div class="ob-body"><div class="ob-pane" id="obPane">${obPane(key)}</div></div>
+      <div class="ob-foot">
+        <div class="lft"><button class="ob-back" id="obBack" style="visibility:${i === 0 ? "hidden" : "visible"}">← Назад</button></div>
+        <div class="ob-mid"><span class="ob-count">Крок ${i + 1} з ${total}</span>
+          <div class="ob-dots" aria-hidden="true">${OB_STEPS.map((_, idx) => `<div class="ob-dot ${idx === i ? "on" : ""}"></div>`).join("")}</div></div>
+        <div class="rgt">${i < total - 1 ? `<button class="ob-skip" id="obSkip">Пропустити</button>` : ""}<button class="btn pri" id="obNext">${i === total - 1 ? "Завершити" : (i === 0 ? "Почати" : "Далі")}</button></div>
+      </div>
+    </div>`;
+  obWire(key);
+  // focus moves to each step's heading on advance (assistive tech announces it)
+  requestAnimationFrame(() => { const h = root.querySelector("#obPane h1"); if (h) { h.setAttribute("tabindex", "-1"); h.focus(); } });
+}
+function obWire(key) {
+  const root = document.getElementById("obRoot");
+  root.querySelector("#obNext").onclick = obNext;
+  const back = root.querySelector("#obBack"); if (back) back.onclick = obBack;
+  const skip = root.querySelector("#obSkip"); if (skip) skip.onclick = obSkip;
+  if (key === "lang") {
+    const tg = root.querySelector("#obAutoLang");
+    tg.onclick = () => {
+      state.settings.autoLang = !state.settings.autoLang;
+      tg.classList.toggle("on", state.settings.autoLang);
+      tg.setAttribute("aria-checked", state.settings.autoLang ? "true" : "false");
+      saveSettings();  // same save_settings payload the General tab uses
+    };
+  }
+  if (key === "model") root.querySelectorAll("#obMcards .mcard").forEach((c) => {
+    c.onclick = () => obModelSelect(c.dataset.mid);
+    c.onkeydown = (e) => obModelKey(e, c.dataset.mid);
+  });
+  if (key === "mic") { const b = root.querySelector("#obMicBtn"); b.onclick = () => obMicTest(b); }
+  if (key === "hotkey") { const b = root.querySelector("#obHkBtn"); b.onclick = () => obCaptureHotkey(b); }
+  if (key === "license") { const lic = root.querySelector("#obLic"); lic.oninput = () => state.onb.lic = lic.value; }
+}
+async function obModelSelect(id) {
+  const m = (state.models || []).find((x) => x.id === id);
+  if (!m) return;
+  // downloads stay in Settings: an uninstalled model is not activated here, only
+  // pointed at where to get it — no multi-GB pull kicked off inside onboarding
+  if (!m.installed) { toast("Спершу завантажте цю модель у Налаштуваннях → Модель"); return; }
+  const r = await api("activate_model", id);
+  if (r && r.ok === false) { toast(r.error || "не вдалося"); return; }
+  state.models = (await api("list_models")) || state.models;
+  state.onb.model = id;
+  state.settings.model = id;
+  const host = document.getElementById("obMcards");
+  if (host) {
+    host.innerHTML = obModelCards();
+    host.querySelectorAll(".mcard").forEach((c) => {
+      c.onclick = () => obModelSelect(c.dataset.mid);
+      c.onkeydown = (e) => obModelKey(e, c.dataset.mid);
+    });
+    const sel = host.querySelector(".mcard.on"); if (sel) sel.focus();
+  }
+}
+function obModelKey(e, id) {
+  const cards = [...document.querySelectorAll("#obMcards .mcard")];
+  const idx = cards.findIndex((c) => c.dataset.mid === id);
+  if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") { e.preventDefault(); obModelSelect(id); return; }
+  let ni = -1;
+  if (e.key === "ArrowDown" || e.key === "ArrowRight") ni = (idx + 1) % cards.length;
+  else if (e.key === "ArrowUp" || e.key === "ArrowLeft") ni = (idx - 1 + cards.length) % cards.length;
+  if (ni < 0) return;
+  e.preventDefault();
+  cards.forEach((c) => c.tabIndex = -1);
+  cards[ni].tabIndex = 0; cards[ni].focus();
+}
+async function obMicTest(btn) {
+  const lvl = document.getElementById("obLvl"), hint = document.getElementById("obMicHint");
+  if (obMicTimer) {
+    obStopMic();
+    btn.textContent = "Перевірити"; btn.classList.remove("pri"); btn.classList.add("ghost");
+    if (lvl) lvl.style.transform = "scaleX(0)";
+    if (hint) hint.textContent = "Натисніть «Перевірити» і скажіть кілька слів";
+    return;
+  }
+  await api("mic_test", true);
+  btn.textContent = "Стоп"; btn.classList.remove("ghost"); btn.classList.add("pri");
+  obMicPeak = 0;
+  // identical meter maths to the Microphone settings tab: full scale = 0.1 RMS,
+  // the 0.02 "hears you" threshold sits on the tick
+  obMicTimer = setInterval(async () => {
+    const v = await api("get_input_level");
+    obMicPeak = Math.max(obMicPeak, v);
+    const f = document.getElementById("obLvl");
+    if (f) { f.style.transform = `scaleX(${Math.min(1, v / 0.1)})`; f.style.background = v > 0.02 ? "var(--aqua)" : "var(--coral)"; }
+    const h = document.getElementById("obMicHint");
+    if (h) h.textContent = obMicPeak > 0.02 ? "Мікрофон чує голос ✓"
+      : "Говоріть у мікрофон… Якщо смужка майже не рухається — підніміть гучність мікрофона у Windows.";
+  }, 100);
+}
+function obStopMic() {
+  if (!obMicTimer) return;
+  clearInterval(obMicTimer); obMicTimer = null;
+  api("mic_test", false);  // release the mic when leaving the step
+}
+async function obCaptureHotkey(btn) {
+  btn.classList.remove("ghost"); btn.classList.add("pri");
+  btn.textContent = "Слухаю…";
+  const combo = await api("capture_hotkey");
+  state.hotkey = combo || state.hotkey;
+  if (state.onb) state.onb.hotkey = state.hotkey;
+  btn.classList.remove("pri"); btn.classList.add("ghost");
+  btn.textContent = "Змінити";
+  const cap = document.getElementById("obCap"); if (cap) cap.textContent = state.hotkey;
+  paintTopHint();
+}
+async function obNext() {
+  obStopMic();
+  const key = OB_STEPS[state.onb.i];
+  // license is optional; if a key was typed, try it before advancing and keep
+  // the user on the step if it is rejected, but never force activation
+  if (key === "license") {
+    const val = (state.onb.lic || "").trim();
+    if (val) {
+      const res = await api("activate_license", val);
+      if (res && res.ok) {
+        state.license = { licensed: true, daysLeft: res.daysLeft, exp: res.exp,
+                          reason: "ok", customer: res.customer || "" };
+        toast("Ліцензію активовано");
+      } else {
+        const err = document.getElementById("obLicErr");
+        if (err) { err.style.display = "flex"; err.innerHTML = svg(ICON.warn, 15) + esc((res && res.error) || "Помилка активації"); }
+        return;
+      }
+    }
+  }
+  if (state.onb.i < OB_STEPS.length - 1) { state.onb.i++; obRender(); }
+  else obFinish();
+}
+function obBack() {
+  obStopMic();
+  const err = document.getElementById("obLicErr"); if (err) err.style.display = "none";
+  if (state.onb.i > 0) { state.onb.i--; obRender(); }
+}
+async function obFinishGate() {
+  await api("finish_onboarding");
+  state.onboarded = true;
+}
+async function obFinish() { await obFinishGate(); obClose(); }
+async function obSkip() { obStopMic(); await obFinishGate(); obClose(); }
+function obClose() {
+  obStopMic();
+  state.onb = null; state.page = "home";
+  document.body.classList.remove("ob-open");
+  const root = document.getElementById("obRoot");
+  if (root) { root.setAttribute("aria-hidden", "true"); root.innerHTML = ""; }
+  renderNav(); render();
+  // land on Home with focus on its heading
+  requestAnimationFrame(() => { const h = document.querySelector(".htitle"); if (h) { h.setAttribute("tabindex", "-1"); h.focus(); } });
+}
+function openOnboarding() {
+  stopMicTest();  // silence any settings mic test still running
+  const active = (state.models || []).find((m) => m.active);
+  state.onb = { i: 0, hotkey: state.hotkey, lic: "",
+                model: active ? active.id : (state.models[0] ? state.models[0].id : "") };
+  // clear the chrome underneath so exactly one <h1> (the wizard's) is in the DOM
+  const body = document.getElementById("body"); if (body) body.innerHTML = "";
+  document.body.classList.add("ob-open");
+  const root = document.getElementById("obRoot");
+  if (root) root.setAttribute("aria-hidden", "false");
+  obRender();
+}
+window.openOnboarding = openOnboarding;
 
 // ---- live status poll ----
 async function tickStatus() {
