@@ -107,7 +107,7 @@ function mock(method, args) {
     // Preview the first-run wizard in a plain browser by adding ?onboard to the
     // URL; without it the mock reports an already-onboarded user (no wizard).
     onboarded: !/[?&]onboard\b/.test(location.search),
-    theme: "dark", gpu: "RTX 3070", hotkey: "Fn", version: "1.4.0",
+    theme: "dark", gpu: "RTX 3070", hotkey: "Fn", version: "1.4.1",
     license: { licensed: true, daysLeft: 23, exp: "2026-08-04", reason: "ok", customer: "demo@buyer" },
     status: "idle",
     stats: { wordsToday: 2481, dictations: 37, wordsTotal: 184920, wpm: 132 },
@@ -145,6 +145,7 @@ function mock(method, args) {
   if (method === "fix_mic_level") return { ok: true, before: 0.14, after: 0.85,
     changed: true, reason: "Рівень мікрофона піднято з 14% до 85%." };
   if (method === "check_update") return { available: false, version: "", url: "" };
+  if (method === "verify_stt") return { ok: false, message: "(демо) перевірка ключа доступна лише в застосунку" };
   if (method === "get_license") return state.license;
   if (method === "activate_license") return { ok: true, licensed: true, daysLeft: 30, exp: "2026-08-11", reason: "ok" };
   if (method === "save_settings") { console.log("[mock] save_settings", args[0]); return true; }
@@ -872,6 +873,11 @@ function sttCloudHtml() {
         <div class="hint">Оберіть модель провайдера</div></div>
       <select class="sel" id="sttModel" aria-label="Модель розпізнавання">${sttModelOptions()}</select></div>
     <div class="stt-badges" id="sttBadges">${sttModelBadgesHtml()}</div>
+    <div class="srow" style="border:none;padding-top:10px"><div style="min-width:0">
+        <div class="lab">Перевірка ключа</div>
+        <div class="hint">Тестовий запит до провайдера — чи працюють ключ і кошти</div></div>
+      <button class="btn ghost" id="sttVerify">Перевірити</button></div>
+    <div class="note" id="sttVerifyNote" style="display:none;margin-top:0"></div>
     <div class="hint" style="margin-top:10px">Ціни орієнтовні — актуальні у провайдера.${p.free ? " У цього сервісу є безкоштовний ліміт." : ""}</div>`;
 }
 function toggleRow(label, hint, key, help) {
@@ -1173,8 +1179,9 @@ function saveSettings() {
   // one payload, one Python method: save_settings(s) in webview_app.py reads the
   // camelCase keys it knows and ignores the rest, so every control on every tab
   // — including the floating-panel ones — travels through this single call.
-  api("save_settings", JSON.parse(JSON.stringify(state.settings)));
+  const p = api("save_settings", JSON.parse(JSON.stringify(state.settings)));
   paintPrivacy();
+  return p;
 }
 let saveTimer = null;
 // the drag and the range slider fire continuously; coalesce them into one write
@@ -1209,6 +1216,24 @@ function bindSttCloud(el) {
     const key = el.querySelector("#" + p.keyProp);
     if (key) key.oninput = () => { state.settings[p.keyProp] = key.value; saveSettingsSoon(); };
   }
+  const vb = el.querySelector("#sttVerify");
+  if (vb) vb.onclick = async () => {
+    const note = el.querySelector("#sttVerifyNote");
+    const lbl = vb.textContent;
+    vb.disabled = true; vb.textContent = "Перевіряю…";
+    try {
+      await saveSettings();                 // persist provider/model/key first
+      const r = await api("verify_stt");
+      if (note) {
+        note.style.display = "flex";
+        note.className = "note " + (r && r.ok ? "ok" : "err");
+        note.innerHTML = svg(r && r.ok ? ICON.check : ICON.warn, 15) +
+          esc((r && r.message) || "Немає відповіді");
+      }
+    } finally {
+      vb.disabled = false; vb.textContent = lbl;
+    }
+  };
 }
 function bindSttPane(el) {
   const segBtns = [...el.querySelectorAll('.seg [data-stt]')];
@@ -1772,7 +1797,7 @@ function fpWidgetKey(e) {
 const OB_STEPS = ["welcome", "lang", "model", "mic", "hotkey", "license", "done"];
 const OB_LABEL = { welcome: "Вітаємо", lang: "Мова", model: "Модель", mic: "Мікрофон",
                    hotkey: "Клавіша", license: "Ліцензія", done: "Готово" };
-const OB_BRANDMARK = `<svg class="brandmark" width="34" height="34" viewBox="0 0 100 100" fill="none" aria-hidden="true"><g><line x1="50.00" y1="21.00" x2="50.00" y2="10.50" stroke="#33CBBB" stroke-width="2.3" stroke-linecap="round"/><line x1="54.54" y1="21.36" x2="56.18" y2="10.99" stroke="#34CABA" stroke-width="2.3" stroke-linecap="round"/><line x1="58.96" y1="22.42" x2="62.21" y2="12.43" stroke="#38C9B9" stroke-width="2.3" stroke-linecap="round"/><line x1="63.17" y1="24.16" x2="67.93" y2="14.81" stroke="#3EC6B6" stroke-width="2.3" stroke-linecap="round"/><line x1="67.05" y1="26.54" x2="73.22" y2="18.04" stroke="#46C2B2" stroke-width="2.3" stroke-linecap="round"/><line x1="70.51" y1="29.49" x2="77.93" y2="22.07" stroke="#51BDAD" stroke-width="2.3" stroke-linecap="round"/><line x1="73.46" y1="32.95" x2="81.96" y2="26.78" stroke="#5DB7A8" stroke-width="2.3" stroke-linecap="round"/><line x1="75.84" y1="36.83" x2="85.19" y2="32.07" stroke="#6BB1A2" stroke-width="2.3" stroke-linecap="round"/><line x1="77.58" y1="41.04" x2="87.57" y2="37.79" stroke="#79AA9B" stroke-width="2.3" stroke-linecap="round"/><line x1="78.64" y1="45.46" x2="89.01" y2="43.82" stroke="#89A394" stroke-width="2.3" stroke-linecap="round"/><line x1="79.00" y1="50.00" x2="89.50" y2="50.00" stroke="#999B8C" stroke-width="2.3" stroke-linecap="round"/><line x1="78.64" y1="54.54" x2="89.01" y2="56.18" stroke="#A99385" stroke-width="2.3" stroke-linecap="round"/><line x1="77.58" y1="58.96" x2="87.57" y2="62.21" stroke="#B98C7E" stroke-width="2.3" stroke-linecap="round"/><line x1="75.84" y1="63.17" x2="85.19" y2="67.93" stroke="#C78577" stroke-width="2.3" stroke-linecap="round"/><line x1="73.46" y1="67.05" x2="81.96" y2="73.22" stroke="#D57F71" stroke-width="2.3" stroke-linecap="round"/><line x1="70.51" y1="70.51" x2="77.93" y2="77.93" stroke="#E1796C" stroke-width="2.3" stroke-linecap="round"/><line x1="67.05" y1="73.46" x2="73.22" y2="81.96" stroke="#EC7467" stroke-width="2.3" stroke-linecap="round"/><line x1="63.17" y1="75.84" x2="67.93" y2="85.19" stroke="#F47063" stroke-width="2.3" stroke-linecap="round"/><line x1="58.96" y1="77.58" x2="62.21" y2="87.57" stroke="#FA6D60" stroke-width="2.3" stroke-linecap="round"/><line x1="54.54" y1="78.64" x2="56.18" y2="89.01" stroke="#FE6C5F" stroke-width="2.3" stroke-linecap="round"/><line x1="50.00" y1="79.00" x2="50.00" y2="89.50" stroke="#FF6B5E" stroke-width="2.3" stroke-linecap="round"/><line x1="45.46" y1="78.64" x2="43.82" y2="89.01" stroke="#FE6C5F" stroke-width="2.3" stroke-linecap="round"/><line x1="41.04" y1="77.58" x2="37.79" y2="87.57" stroke="#FA6D60" stroke-width="2.3" stroke-linecap="round"/><line x1="36.83" y1="75.84" x2="32.07" y2="85.19" stroke="#F47063" stroke-width="2.3" stroke-linecap="round"/><line x1="32.95" y1="73.46" x2="26.78" y2="81.96" stroke="#EC7467" stroke-width="2.3" stroke-linecap="round"/><line x1="29.49" y1="70.51" x2="22.07" y2="77.93" stroke="#E1796C" stroke-width="2.3" stroke-linecap="round"/><line x1="26.54" y1="67.05" x2="18.04" y2="73.22" stroke="#D57F71" stroke-width="2.3" stroke-linecap="round"/><line x1="24.16" y1="63.17" x2="14.81" y2="67.93" stroke="#C78577" stroke-width="2.3" stroke-linecap="round"/><line x1="22.42" y1="58.96" x2="12.43" y2="62.21" stroke="#B98C7E" stroke-width="2.3" stroke-linecap="round"/><line x1="21.36" y1="54.54" x2="10.99" y2="56.18" stroke="#A99385" stroke-width="2.3" stroke-linecap="round"/><line x1="21.00" y1="50.00" x2="10.50" y2="50.00" stroke="#999B8C" stroke-width="2.3" stroke-linecap="round"/><line x1="21.36" y1="45.46" x2="10.99" y2="43.82" stroke="#89A394" stroke-width="2.3" stroke-linecap="round"/><line x1="22.42" y1="41.04" x2="12.43" y2="37.79" stroke="#79AA9B" stroke-width="2.3" stroke-linecap="round"/><line x1="24.16" y1="36.83" x2="14.81" y2="32.07" stroke="#6BB1A2" stroke-width="2.3" stroke-linecap="round"/><line x1="26.54" y1="32.95" x2="18.04" y2="26.78" stroke="#5DB7A8" stroke-width="2.3" stroke-linecap="round"/><line x1="29.49" y1="29.49" x2="22.07" y2="22.07" stroke="#51BDAD" stroke-width="2.3" stroke-linecap="round"/><line x1="32.95" y1="26.54" x2="26.78" y2="18.04" stroke="#46C2B2" stroke-width="2.3" stroke-linecap="round"/><line x1="36.83" y1="24.16" x2="32.07" y2="14.81" stroke="#3EC6B6" stroke-width="2.3" stroke-linecap="round"/><line x1="41.04" y1="22.42" x2="37.79" y2="12.43" stroke="#38C9B9" stroke-width="2.3" stroke-linecap="round"/><line x1="45.46" y1="21.36" x2="43.82" y2="10.99" stroke="#34CABA" stroke-width="2.3" stroke-linecap="round"/></g><text class="bm-k" x="50" y="53" text-anchor="middle" dominant-baseline="central" font-family="'IBM Plex Sans',system-ui,sans-serif" font-weight="700" font-size="40" fill="#FF6B5E">k</text></svg>`;
+const OB_BRANDMARK = `<svg class="brandmark" width="34" height="34" viewBox="0 0 100 100" fill="none" aria-hidden="true"><g><line x1="50.00" y1="21.00" x2="50.00" y2="10.50" stroke="#33CBBB" stroke-width="2.3" stroke-linecap="round"/><line x1="54.54" y1="21.36" x2="56.18" y2="10.99" stroke="#34CABA" stroke-width="2.3" stroke-linecap="round"/><line x1="58.96" y1="22.42" x2="62.21" y2="12.43" stroke="#38C9B9" stroke-width="2.3" stroke-linecap="round"/><line x1="63.17" y1="24.16" x2="67.93" y2="14.81" stroke="#3EC6B6" stroke-width="2.3" stroke-linecap="round"/><line x1="67.05" y1="26.54" x2="73.22" y2="18.04" stroke="#46C2B2" stroke-width="2.3" stroke-linecap="round"/><line x1="70.51" y1="29.49" x2="77.93" y2="22.07" stroke="#51BDAD" stroke-width="2.3" stroke-linecap="round"/><line x1="73.46" y1="32.95" x2="81.96" y2="26.78" stroke="#5DB7A8" stroke-width="2.3" stroke-linecap="round"/><line x1="75.84" y1="36.83" x2="85.19" y2="32.07" stroke="#6BB1A2" stroke-width="2.3" stroke-linecap="round"/><line x1="77.58" y1="41.04" x2="87.57" y2="37.79" stroke="#79AA9B" stroke-width="2.3" stroke-linecap="round"/><line x1="78.64" y1="45.46" x2="89.01" y2="43.82" stroke="#89A394" stroke-width="2.3" stroke-linecap="round"/><line x1="79.00" y1="50.00" x2="89.50" y2="50.00" stroke="#999B8C" stroke-width="2.3" stroke-linecap="round"/><line x1="78.64" y1="54.54" x2="89.01" y2="56.18" stroke="#A99385" stroke-width="2.3" stroke-linecap="round"/><line x1="77.58" y1="58.96" x2="87.57" y2="62.21" stroke="#B98C7E" stroke-width="2.3" stroke-linecap="round"/><line x1="75.84" y1="63.17" x2="85.19" y2="67.93" stroke="#C78577" stroke-width="2.3" stroke-linecap="round"/><line x1="73.46" y1="67.05" x2="81.96" y2="73.22" stroke="#D57F71" stroke-width="2.3" stroke-linecap="round"/><line x1="70.51" y1="70.51" x2="77.93" y2="77.93" stroke="#E1796C" stroke-width="2.3" stroke-linecap="round"/><line x1="67.05" y1="73.46" x2="73.22" y2="81.96" stroke="#EC7467" stroke-width="2.3" stroke-linecap="round"/><line x1="63.17" y1="75.84" x2="67.93" y2="85.19" stroke="#F47063" stroke-width="2.3" stroke-linecap="round"/><line x1="58.96" y1="77.58" x2="62.21" y2="87.57" stroke="#FA6D60" stroke-width="2.3" stroke-linecap="round"/><line x1="54.54" y1="78.64" x2="56.18" y2="89.01" stroke="#FE6C5F" stroke-width="2.3" stroke-linecap="round"/><line x1="50.00" y1="79.00" x2="50.00" y2="89.50" stroke="#FF6B5E" stroke-width="2.3" stroke-linecap="round"/><line x1="45.46" y1="78.64" x2="43.82" y2="89.01" stroke="#FE6C5F" stroke-width="2.3" stroke-linecap="round"/><line x1="41.04" y1="77.58" x2="37.79" y2="87.57" stroke="#FA6D60" stroke-width="2.3" stroke-linecap="round"/><line x1="36.83" y1="75.84" x2="32.07" y2="85.19" stroke="#F47063" stroke-width="2.3" stroke-linecap="round"/><line x1="32.95" y1="73.46" x2="26.78" y2="81.96" stroke="#EC7467" stroke-width="2.3" stroke-linecap="round"/><line x1="29.49" y1="70.51" x2="22.07" y2="77.93" stroke="#E1796C" stroke-width="2.3" stroke-linecap="round"/><line x1="26.54" y1="67.05" x2="18.04" y2="73.22" stroke="#D57F71" stroke-width="2.3" stroke-linecap="round"/><line x1="24.16" y1="63.17" x2="14.81" y2="67.93" stroke="#C78577" stroke-width="2.3" stroke-linecap="round"/><line x1="22.42" y1="58.96" x2="12.43" y2="62.21" stroke="#B98C7E" stroke-width="2.3" stroke-linecap="round"/><line x1="21.36" y1="54.54" x2="10.99" y2="56.18" stroke="#A99385" stroke-width="2.3" stroke-linecap="round"/><line x1="21.00" y1="50.00" x2="10.50" y2="50.00" stroke="#999B8C" stroke-width="2.3" stroke-linecap="round"/><line x1="21.36" y1="45.46" x2="10.99" y2="43.82" stroke="#89A394" stroke-width="2.3" stroke-linecap="round"/><line x1="22.42" y1="41.04" x2="12.43" y2="37.79" stroke="#79AA9B" stroke-width="2.3" stroke-linecap="round"/><line x1="24.16" y1="36.83" x2="14.81" y2="32.07" stroke="#6BB1A2" stroke-width="2.3" stroke-linecap="round"/><line x1="26.54" y1="32.95" x2="18.04" y2="26.78" stroke="#5DB7A8" stroke-width="2.3" stroke-linecap="round"/><line x1="29.49" y1="29.49" x2="22.07" y2="22.07" stroke="#51BDAD" stroke-width="2.3" stroke-linecap="round"/><line x1="32.95" y1="26.54" x2="26.78" y2="18.04" stroke="#46C2B2" stroke-width="2.3" stroke-linecap="round"/><line x1="36.83" y1="24.16" x2="32.07" y2="14.81" stroke="#3EC6B6" stroke-width="2.3" stroke-linecap="round"/><line x1="41.04" y1="22.42" x2="37.79" y2="12.43" stroke="#38C9B9" stroke-width="2.3" stroke-linecap="round"/><line x1="45.46" y1="21.36" x2="43.82" y2="10.99" stroke="#34CABA" stroke-width="2.3" stroke-linecap="round"/></g><text class="bm-k" x="48.7" y="50" text-anchor="middle" dominant-baseline="central" font-family="'IBM Plex Sans',system-ui,sans-serif" font-weight="700" font-size="34" fill="#FF6B5E">k</text></svg>`;
 let obMicTimer = null, obMicPeak = 0;
 
 function obModelCards() {

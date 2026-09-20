@@ -224,6 +224,10 @@ class Api:
     def activate_license(self, key):
         return flow.activate_license(key or "")
 
+    def verify_stt(self):
+        # persists first via save_settings, so this reads the just-entered key
+        return flow.verify_stt()
+
     def check_update(self):
         return flow.check_update()
 

@@ -171,7 +171,7 @@ from faster_whisper import WhisperModel
 import text_fixes
 
 # ---------------- Config ----------------
-APP_VERSION = "1.4.0"  # single source of truth; build.ps1 feeds it to Inno
+APP_VERSION = "1.4.1"  # single source of truth; build.ps1 feeds it to Inno
 GITHUB_REPO = "kuubek5/kuubwave"  # public releases-only repo the updater polls
 # Cloudflare (in front of Groq) 403s urllib's default agent — send a browser one
 HTTP_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -1312,9 +1312,40 @@ def _cloud_transcribe(audio, lang_hint: str | None = None) -> str:
     headers["Content-Type"] = ctype
     headers["User-Agent"] = HTTP_UA  # Cloudflare 403s the default urllib agent
     req = urllib.request.Request(url, data=body, headers=headers, method="POST")
-    with urllib.request.urlopen(req, timeout=60) as r:
-        data = json.load(r)
+    try:
+        with urllib.request.urlopen(req, timeout=60) as r:
+            data = json.load(r)
+    except urllib.error.HTTPError as e:
+        # surface the provider's own message (bad key, no credits, wrong model)
+        detail = ""
+        try:
+            payload = json.loads(e.read().decode("utf-8", "replace"))
+            detail = (payload.get("error", {}) or {}).get("message") \
+                or payload.get("detail") or payload.get("message") or ""
+            if isinstance(detail, dict):
+                detail = detail.get("message") or detail.get("status") or str(detail)
+        except Exception:
+            pass
+        raise RuntimeError(f"{provider} HTTP {e.code}: {detail or e.reason}")
     return (data.get("text") or "").strip()
+
+
+def verify_stt() -> dict:
+    """Test the currently configured cloud provider/model/key with one tiny real
+    request. Returns {ok, message}. Catches the common failures the user hits —
+    a bad key, no credits, or a wrong model — with the provider's own wording."""
+    provider = config.get("stt_provider", "groq")
+    # 0.4 s of a quiet tone: a structurally valid clip the API will accept, so a
+    # 200 proves key + credits + model, while auth/quota faults return non-200.
+    n = int(SAMPLE_RATE * 0.4)
+    t = np.arange(n, dtype=np.float32) / SAMPLE_RATE
+    tone = (0.05 * np.sin(2 * np.pi * 220.0 * t)).astype(np.float32)
+    try:
+        _cloud_transcribe(tone, None)
+        return {"ok": True, "message": f"{provider}: ключ працює"}
+    except Exception as e:
+        log(f"stt verify failed ({e.__class__.__name__}: {e})")
+        return {"ok": False, "message": str(e)}
 
 
 # ---------------- Licensing ----------------
@@ -2281,7 +2312,7 @@ def _transcribe_impl(pre: list, cur: list, target_hwnd: int) -> None:
                 text = _cloud_transcribe(audio, hint)
             except Exception as e:
                 log(f"cloud STT failed ({e.__class__.__name__}: {e})")
-                done_msg, ok = "хмара недоступна", False
+                done_msg, ok = ("хмара: " + str(e))[:80], False
                 return
             log(f"{dur:.1f}s audio -> {time.time()-t0:.2f}s cloud "
                 f"[{config.get('stt_provider')}/{config.get('stt_model')}]: {text!r}")
