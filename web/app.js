@@ -107,7 +107,7 @@ function mock(method, args) {
     // Preview the first-run wizard in a plain browser by adding ?onboard to the
     // URL; without it the mock reports an already-onboarded user (no wizard).
     onboarded: !/[?&]onboard\b/.test(location.search),
-    theme: "dark", gpu: "RTX 3070", hotkey: "Fn", version: "1.4.1",
+    theme: "dark", gpu: "RTX 3070", hotkey: "Fn", version: "1.4.2",
     license: { licensed: true, daysLeft: 23, exp: "2026-08-04", reason: "ok", customer: "demo@buyer" },
     status: "idle",
     stats: { wordsToday: 2481, dictations: 37, wordsTotal: 184920, wpm: 132 },
@@ -835,6 +835,13 @@ const STT_PROVIDERS = {
     ] },
 };
 function sttProvider() { return STT_PROVIDERS[state.settings.sttProvider] || STT_PROVIDERS.groq; }
+function sttActiveLabel() {
+  const s = state.settings;
+  if (s.sttBackend === "cloud") {
+    return `Активно: Хмара · ${sttProvider().label}${s.sttModel ? " · " + esc(s.sttModel) : ""}`;
+  }
+  return "Активно: Локально (на вашому пристрої)";
+}
 function sttModelBadgesHtml() {
   const p = sttProvider();
   const m = p.models.find((x) => x.id === state.settings.sttModel) || p.models[0];
@@ -931,6 +938,7 @@ function renderSettings(el) {
         <div class="seg" role="group" aria-label="Спосіб розпізнавання" style="margin-top:12px">
           <button data-stt="local" class="${s.sttBackend === "local" ? "on" : ""}" aria-pressed="${s.sttBackend === "local"}">Локально</button>
           <button data-stt="cloud" class="${s.sttBackend === "cloud" ? "on" : ""}" aria-pressed="${s.sttBackend === "cloud"}">Хмара</button></div>
+        <div class="stt-active" id="sttActive">${sttActiveLabel()}</div>
         <div id="sttLocal"${s.sttBackend === "cloud" ? " hidden" : ""}>
           <div class="mcards" id="mcards" role="radiogroup" aria-label="Модель розпізнавання" style="margin-top:14px"></div>
           <div class="srow" style="margin-top:6px"><div style="min-width:0"><div class="lab">Пристрій обробки</div>
@@ -1202,6 +1210,8 @@ function bindSttCloud(el) {
     state.settings.sttModel = sttProvider().models[0].id;
     const cloud = el.querySelector("#sttCloud");
     if (cloud) { cloud.innerHTML = sttCloudHtml(); bindSttCloud(el); }
+    const act = el.querySelector("#sttActive");
+    if (act) act.innerHTML = sttActiveLabel();
     saveSettingsSoon();
   };
   const mdl = el.querySelector("#sttModel");
@@ -1209,6 +1219,8 @@ function bindSttCloud(el) {
     state.settings.sttModel = mdl.value;
     const b = el.querySelector("#sttBadges");
     if (b) b.innerHTML = sttModelBadgesHtml();
+    const act = el.querySelector("#sttActive");
+    if (act) act.innerHTML = sttActiveLabel();
     saveSettingsSoon();
   };
   const p = sttProvider();
@@ -1249,6 +1261,8 @@ function bindSttPane(el) {
       const local = el.querySelector("#sttLocal"), cloud = el.querySelector("#sttCloud");
       if (local) local.toggleAttribute("hidden", v !== "local");
       if (cloud) cloud.toggleAttribute("hidden", v !== "cloud");
+      const act = el.querySelector("#sttActive");
+      if (act) act.innerHTML = sttActiveLabel();
       saveSettings();
     };
   });

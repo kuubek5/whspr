@@ -20,6 +20,7 @@ import collections
 import io
 import wave
 import uuid
+import subprocess
 import urllib.error
 import urllib.request
 
@@ -171,7 +172,7 @@ from faster_whisper import WhisperModel
 import text_fixes
 
 # ---------------- Config ----------------
-APP_VERSION = "1.4.1"  # single source of truth; build.ps1 feeds it to Inno
+APP_VERSION = "1.4.2"  # single source of truth; build.ps1 feeds it to Inno
 GITHUB_REPO = "kuubek5/kuubwave"  # public releases-only repo the updater polls
 # Cloudflare (in front of Groq) 403s urllib's default agent — send a browser one
 HTTP_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -1208,8 +1209,9 @@ def check_update() -> dict:
 
 
 def download_update(url: str) -> bool:
-    """Download the installer to a temp file and launch it. The running app
-    should quit afterwards so the installer can replace its files."""
+    """Download the installer to a temp file and run it SILENTLY. The running app
+    should quit right after so the installer can replace its files; the installer
+    relaunches KuubWave when it finishes (see kuubwave.iss [Run])."""
     try:
         import tempfile
         fd, path = tempfile.mkstemp(suffix="-kuubwave-setup.exe")
@@ -1227,7 +1229,10 @@ def download_update(url: str) -> bool:
                     set_download(True, "Оновлення", mb=done >> 20,
                                  total_mb=(total >> 20) if total else 0)
         set_download(False)
-        os.startfile(path)  # noqa: launch the installer (Windows)
+        # Inno silent flags: no wizard, no message boxes, close the running app so
+        # its files unlock, and don't reboot. The app quits itself just after.
+        subprocess.Popen([path, "/VERYSILENT", "/SUPPRESSMSGBOXES",
+                          "/NORESTART", "/FORCECLOSEAPPLICATIONS"])
         return True
     except Exception as e:
         log(f"update download failed ({e.__class__.__name__}: {e})")

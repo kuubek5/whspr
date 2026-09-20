@@ -57,12 +57,17 @@ Name: "startup"; Description: "Запускати KuubWave при вході в 
 Source: "..\dist\KuubWave\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 
 [Icons]
-Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"
-Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: desktopicon
+; IconFilename pins each shortcut to the exe's embedded icon explicitly, so a
+; rebranded build refreshes the shortcut icon instead of showing a stale one.
+Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"; IconFilename: "{app}\{#AppExe}"; IconIndex: 0
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; IconFilename: "{app}\{#AppExe}"; IconIndex: 0; Tasks: desktopicon
 Name: "{userstartup}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: startup
 
 [Run]
-Filename: "{app}\{#AppExe}"; Description: "Запустити KuubWave"; Flags: nowait postinstall skipifsilent
+; No skipifsilent: an auto-update runs the installer with /VERYSILENT, and we
+; still want KuubWave relaunched when it finishes. postinstall (without
+; skipifsilent) executes in silent mode too.
+Filename: "{app}\{#AppExe}"; Description: "Запустити KuubWave"; Flags: nowait postinstall
 
 [UninstallDelete]
 ; remove per-user data (config/db/log/models/cuda) on uninstall

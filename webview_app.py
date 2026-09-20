@@ -464,6 +464,19 @@ def run() -> None:
     except Exception:
         pass
 
+    # First run (onboarding) opens maximized so it never appears in the cramped,
+    # half-collapsed state a small initial window shows on some Windows setups.
+    if not flow.config.get("onboarded", True):
+        def _maximize_first_run():
+            try:
+                window.maximize()
+            except Exception as e:
+                flow.log(f"first-run maximize skipped ({e.__class__.__name__}: {e})")
+        try:
+            window.events.loaded += _maximize_first_run
+        except Exception:
+            pass
+
     # The floating status pill lives in a Tkinter overlay (flow._start_overlay),
     # not a pywebview window: WebView2 on Windows can't render a transparent,
     # rounded, always-on-top capsule, so Tk with -transparentcolor handles it.
