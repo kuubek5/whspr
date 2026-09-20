@@ -168,7 +168,7 @@ from faster_whisper import WhisperModel
 import text_fixes
 
 # ---------------- Config ----------------
-APP_VERSION = "1.3.0"  # single source of truth; build.ps1 feeds it to Inno
+APP_VERSION = "1.3.1"  # single source of truth; build.ps1 feeds it to Inno
 GITHUB_REPO = "kuubek5/kuubwave"  # public releases-only repo the updater polls
 # Cloudflare (in front of Groq) 403s urllib's default agent — send a browser one
 HTTP_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -1280,6 +1280,13 @@ def _icon_path() -> str:
     return os.path.join(base, "kuubwave.ico")
 
 
+def _tray_icon_path() -> str:
+    """Simplified tray glyph (a bold coral 'k' on a dark tile). The full logo's
+    radial waveform smears into a blur at 16px, so the tray uses this instead."""
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, "kuubwave_tray.png")
+
+
 # Any string is valid as long as it is stable across runs; Windows uses it as the
 # identity, not as a display name.
 # Deliberately still "whspr.dictation" after the rename: this is the stable
@@ -1322,7 +1329,11 @@ def tray_image(status: str):
     color = STATUS_COLORS.get(status, STATUS_COLORS["idle"])
     size = 64
     try:
-        img = Image.open(_icon_path()).convert("RGBA").resize(
+        # prefer the simplified tray glyph; fall back to the full app icon
+        src = _tray_icon_path()
+        if not os.path.exists(src):
+            src = _icon_path()
+        img = Image.open(src).convert("RGBA").resize(
             (size, size), Image.LANCZOS)
     except Exception:
         img = Image.new("RGBA", (size, size), (0, 0, 0, 0))

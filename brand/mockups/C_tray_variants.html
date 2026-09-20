@@ -1,0 +1,897 @@
+<!DOCTYPE html>
+<html lang="uk" data-theme="light" data-rm="0">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KuubWave — варіанти трей-панелі</title>
+<style>
+:root{
+  --bg:#FBF7F5; --bg2:#F4EEEB; --card:#FFFFFF; --ink:#1B1720; --t2:#5F5866; --t3:#756E7E;
+  --line:rgba(27,23,32,.09); --line2:rgba(27,23,32,.16); --field:#FFFFFF; --field2:#F6F1EE;
+  --coral:#FF6B5E; --coral-d:#EE5348; --coral-ink:#CC3226; --coral-wash:#FFECE9;
+  --aqua:#0FA598; --aqua-ink:#0B7A70; --aqua-wash:rgba(15,165,152,.12);
+  --violet:#6D5AE6; --violet-ink:#5A49CC; --violet-wash:rgba(109,90,230,.12);
+  --amber:#946008; --amber-line:#D9931A; --amber-wash:#FCEFD6;
+  --sh-sm:0 1px 2px rgba(27,23,32,.06),0 4px 12px rgba(27,23,32,.05);
+  --sh:0 1px 2px rgba(27,23,32,.05),0 10px 26px rgba(27,23,32,.07);
+  --tray-bg:#FFFFFF; --tray-ring:rgba(27,23,32,.10);
+  --tray-sh:0 2px 6px rgba(27,23,32,.14),0 16px 38px rgba(27,23,32,.20);
+  /* the pill is only 40px tall, so it gets its own lighter Soft Studio elevation */
+  --pill-sh:0 1px 3px rgba(27,23,32,.13),0 10px 24px rgba(27,23,32,.16);
+  /* recording lifts the window a little higher — neutral elevation, never a coloured glow */
+  --pill-sh-rec:0 2px 5px rgba(27,23,32,.16),0 16px 34px rgba(27,23,32,.22);
+  --r:16px; --r-lg:22px;
+  --ez:cubic-bezier(.16,1,.3,1);
+}
+:root[data-theme="dark"]{
+  --bg:#171319; --bg2:#1F1A22; --card:#221C29; --ink:#F4EEF2; --t2:#BDB3C1; --t3:#A69CAC;
+  --line:rgba(255,255,255,.09); --line2:rgba(255,255,255,.18); --field:#2A2331; --field2:#221C29;
+  --coral:#FF7A6E; --coral-d:#F0574C; --coral-ink:#FF9488; --coral-wash:rgba(255,122,110,.18);
+  --aqua:#33CBBB; --aqua-ink:#4FDACB; --aqua-wash:rgba(51,203,187,.16);
+  --violet:#9784F5; --violet-ink:#B2A3FA; --violet-wash:rgba(151,132,245,.18);
+  --amber:#F0B429; --amber-line:#F0B429; --amber-wash:rgba(240,180,41,.16);
+  --sh-sm:0 1px 2px rgba(0,0,0,.4),0 5px 14px rgba(0,0,0,.35);
+  --sh:0 1px 2px rgba(0,0,0,.4),0 14px 34px rgba(0,0,0,.42);
+  --tray-bg:#221C29; --tray-ring:rgba(255,255,255,.15);
+  --tray-sh:0 2px 8px rgba(0,0,0,.45),0 18px 40px rgba(0,0,0,.5);
+  --pill-sh:0 1px 3px rgba(0,0,0,.46),0 12px 28px rgba(0,0,0,.48);
+  --pill-sh-rec:0 2px 5px rgba(0,0,0,.5),0 18px 38px rgba(0,0,0,.54);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'IBM Plex Sans',system-ui,'Segoe UI',sans-serif;background:var(--bg);color:var(--ink);
+  -webkit-font-smoothing:antialiased;padding:0 0 90px;transition:background .3s,color .2s;overflow-x:hidden}
+.mono{font-family:'JetBrains Mono','Cascadia Code',Consolas,monospace;font-variant-numeric:tabular-nums}
+.wrap{max-width:1216px;margin:0 auto;padding:0 32px}
+button{font-family:inherit}
+button:focus-visible,a:focus-visible,[tabindex]:focus-visible{outline:2px solid var(--coral);outline-offset:2px;border-radius:10px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* ---------- sheet chrome ---------- */
+.top{position:sticky;top:0;z-index:40;background:var(--bg);border-bottom:1px solid var(--line);transition:background .3s}
+.top .wrap{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding-top:14px;padding-bottom:14px}
+.top h1{font-size:17px;font-weight:700;letter-spacing:-.02em;margin-right:auto}
+.top h1 i{color:var(--coral);font-style:normal}
+.ctl{display:inline-flex;align-items:center;gap:8px;height:40px;padding:0 15px;border-radius:12px;
+  border:1px solid var(--line);background:var(--card);color:var(--ink);font-size:12.5px;font-weight:600;
+  cursor:pointer;box-shadow:var(--sh-sm);transition:.15s}
+.ctl:hover{border-color:var(--line2)}
+.ctl:active{transform:translateY(1px)}
+.ctl[aria-pressed="true"]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+.ctl.play[aria-pressed="true"]{background:var(--coral);border-color:var(--coral);color:#fff}
+.ctl svg{flex-shrink:0}
+.intro{padding-top:30px}
+.intro p{font-size:13.5px;color:var(--t2);line-height:1.65;max-width:70ch}
+.intro p+p{margin-top:8px}
+.intro b{color:var(--ink);font-weight:600}
+
+/* ---------- variant block ---------- */
+.variant{padding-top:44px}
+.vhead{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:6px}
+.vhead h2{font-size:21px;font-weight:700;letter-spacing:-.025em}
+.vhead .size{font-size:11.5px;color:var(--t3);background:var(--field2);border:1px solid var(--line);
+  border-radius:8px;padding:3px 9px}
+:root[data-theme="dark"] .vhead .size{background:var(--card)}
+.vsub{font-size:13.5px;color:var(--t2);line-height:1.6;max-width:72ch;margin-bottom:16px}
+.statebar{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:16px}
+.sb{height:36px;padding:0 13px;border-radius:10px;border:1px solid var(--line);background:var(--card);
+  color:var(--t2);font-size:12px;font-weight:600;cursor:pointer;transition:.14s;box-shadow:var(--sh-sm)}
+.sb:hover{color:var(--ink);border-color:var(--line2)}
+.sb[aria-pressed="true"]{background:var(--coral);border-color:var(--coral);color:#fff}
+.sb.ghost[aria-pressed="true"]{background:var(--t2);border-color:var(--t2)}
+
+.stages{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+@media (max-width:1060px){.stages{grid-template-columns:1fr}}
+.stage{min-width:0}
+.stage .cap{font-size:11px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--t3);margin-bottom:7px}
+
+/* faux desktop window behind the tray */
+.win{position:relative;height:274px;border-radius:14px;overflow:hidden;border:1px solid var(--line);
+  box-shadow:var(--sh-sm);isolation:isolate}
+.win.lt{background:#FFFFFF;--w-ink:#1F2430;--w-mut:#6E7686;--w-bar:#F1EFEE;--w-line:rgba(20,22,30,.10)}
+.win.dk{background:#12141C;--w-ink:#D8DEEA;--w-mut:#7B8497;--w-bar:#1A1D27;--w-line:rgba(255,255,255,.08)}
+.wbar{height:30px;background:var(--w-bar);border-bottom:1px solid var(--w-line);display:flex;align-items:center;
+  gap:6px;padding:0 11px}
+.wbar i{width:9px;height:9px;border-radius:50%;background:var(--w-mut);opacity:.42;flex-shrink:0}
+.wbar span{font-size:10.5px;color:var(--w-mut);margin-left:8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.wbody{padding:18px 22px;height:calc(100% - 30px);overflow:hidden}
+.doc h4{font-size:15px;font-weight:700;color:var(--w-ink);letter-spacing:-.01em;margin-bottom:9px}
+.doc p{font-size:12px;line-height:1.75;color:var(--w-mut);max-width:46ch}
+.doc p+p{margin-top:7px}
+.doc .now{color:var(--w-ink)}
+.code{font-family:'JetBrains Mono','Cascadia Code',Consolas,monospace;font-size:11px;line-height:1.85}
+.code .ln{display:flex;gap:14px;white-space:pre}
+.code .g{color:var(--w-mut);opacity:.6;width:14px;text-align:right;flex-shrink:0}
+.code .kw{color:#C792EA}.code .st{color:#89C398}.code .fn{color:#82AAFF}.code .tx{color:var(--w-ink)}
+.caret{display:inline-block;width:1.5px;height:1em;background:currentColor;vertical-align:-2px;margin-left:1px;
+  animation:blink 1.06s step-end infinite}
+@keyframes blink{0%,49%{opacity:1}50%,100%{opacity:0}}
+
+.anchor-b{position:absolute;left:0;right:0;bottom:16px;display:flex;justify-content:center;pointer-events:none;z-index:3}
+.anchor-r{position:absolute;right:0;top:30px;bottom:0;display:flex;align-items:center;justify-content:flex-end;pointer-events:none;z-index:3}
+.anchor-b>*,.anchor-r>*{pointer-events:auto}
+
+/* rationale */
+.why{display:grid;grid-template-columns:repeat(3,1fr);gap:0;margin-top:16px;border-top:1px solid var(--line);padding-top:14px}
+@media (max-width:820px){.why{grid-template-columns:1fr;gap:12px}}
+.why div{padding-right:22px}
+.why h3{font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--t3);margin-bottom:5px}
+.why p{font-size:12.5px;line-height:1.6;color:var(--t2)}
+.why .gr{display:inline-flex;align-items:center;gap:6px;margin-top:7px;font-size:11.5px;font-weight:700;color:var(--ink)}
+.why .gr b{display:inline-flex;gap:3px}
+.why .gr b s{width:7px;height:7px;border-radius:50%;background:var(--line2);text-decoration:none}
+.why .gr b s.on{background:var(--coral)}
+
+/* ================= TRAY BASE ================= */
+/* the tray is a real OS window: its SIZE is the state, so width/height are animated
+   deliberately. contain keeps that layout work inside the panel box. */
+.tp{font-family:inherit;color:var(--ink);background:var(--tray-bg);box-shadow:var(--tray-sh);
+  border:1px solid var(--tray-ring);position:relative;user-select:none;contain:layout style}
+.tp .lbl{font-size:12px;font-weight:600;white-space:nowrap;letter-spacing:-.005em}
+.tp .tm{font-size:12.5px;font-weight:600;color:var(--t2);letter-spacing:-.02em}
+.tp .hint{font-size:11.5px;color:var(--t3);white-space:nowrap}
+.keycap{font-family:'JetBrains Mono','Cascadia Code',Consolas,monospace;font-size:10px;font-weight:600;
+  color:var(--t2);background:var(--field2);border:1px solid var(--line2);border-bottom-width:2px;
+  border-radius:5px;padding:1px 5px;line-height:1.5}
+:root[data-theme="dark"] .keycap{background:#2A2331}
+@keyframes tp-pop{0%{transform:scale(1)}40%{transform:scale(1.09)}100%{transform:scale(1)}}
+@keyframes tp-halo{0%{box-shadow:0 0 0 0 rgba(255,107,94,.42)}70%{box-shadow:0 0 0 11px rgba(255,107,94,0)}100%{box-shadow:0 0 0 0 rgba(255,107,94,0)}}
+@keyframes tp-breath{0%,100%{transform:scale(1);opacity:.55}50%{transform:scale(1.16);opacity:.9}}
+@keyframes tp-sweep{0%{transform:translateX(-100%)}100%{transform:translateX(230%)}}
+/* error: one decisive nudge that eases back, not a shake */
+@keyframes tp-nudge{from{transform:translateX(-6px)}to{transform:translateX(0)}}
+@keyframes tp-draw{from{stroke-dashoffset:24}to{stroke-dashoffset:0}}
+
+/* ================= 1. PILL ================= */
+/* ONE colour identity: coral is the pill's energy in every live state. Aqua appears in
+   exactly one place — the moment the text is handed over (done) — because that is the only
+   state the user must recognise without reading. Everything else is carried by the dot's
+   own geometry (hollow ring / solid / turning arc / check / struck-through / shrunk),
+   so no state depends on hue alone. "Тихо в мікрофоні" is deliberately the calmest and
+   one of the narrowest states: the energy is absent, so the colour is too.
+   Width is measured from content in JS (see sizePill); the six magic numbers are gone.
+   The width transition itself stays: the tray is a real OS window whose size IS the state. */
+.pill{height:40px;border-radius:20px;display:flex;align-items:center;padding:0 14px;overflow:hidden;
+  box-shadow:var(--pill-sh);width:132px;flex:0 0 auto;
+  transition:width .32s var(--ez),box-shadow .28s var(--ez),border-color .2s}
+/* the row keeps its natural size no matter what the window is doing, so nothing can be
+   squeezed; the panel width is then derived from it. */
+.p-row{display:flex;align-items:center;gap:9px;flex:0 0 auto;min-width:max-content}
+
+/* --- the dot: real fill / stroke / radius, one animation owner per element --- */
+.p-dot{position:relative;width:16px;height:16px;flex:0 0 auto;transition:transform .09s linear}
+.p-halo{position:absolute;inset:2px;border-radius:50%;border:1px solid var(--coral);opacity:0;pointer-events:none}
+.p-glyph{position:absolute;inset:0;width:16px;height:16px;display:block;overflow:visible}
+.p-ring{r:5;fill:transparent;stroke:var(--coral);stroke-width:2;
+  transition:fill .22s var(--ez),stroke .22s var(--ez),r .26s var(--ez),opacity .2s}
+.p-arc{fill:none;stroke:var(--coral);stroke-width:2;stroke-linecap:round;stroke-dasharray:9 22.4;
+  opacity:0;transform-origin:8px 8px;transition:opacity .18s}
+.p-check{fill:none;stroke:#fff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;
+  stroke-dasharray:9;stroke-dashoffset:9}
+.p-strike{fill:none;stroke:var(--t2);stroke-width:2;stroke-linecap:round;
+  stroke-dasharray:11;stroke-dashoffset:11}
+@keyframes p-breath{0%,100%{transform:scale(.86);opacity:.5}50%{transform:scale(1.5);opacity:.05}}
+@keyframes p-pulse{0%{transform:scale(.9);opacity:.5}75%,100%{transform:scale(2.2);opacity:0}}
+@keyframes p-spin{to{transform:rotate(360deg)}}
+@keyframes p-draw{to{stroke-dashoffset:0}}
+
+/* очікування — a slow listening breath and nothing else */
+.pill[data-state="idle"] .p-halo{animation:p-breath 3.8s ease-in-out infinite}
+/* запис — the ring fills solid and the dot rides the voice level */
+.pill[data-state="rec"]{box-shadow:var(--pill-sh-rec)}
+.pill[data-state="rec"] .p-ring{fill:var(--coral)}
+.pill[data-state="rec"] .p-dot{transform:scale(calc(1 + var(--lv,.2)*.16))}
+.pill[data-state="rec"] .p-halo{animation:p-pulse 1.5s ease-out infinite}
+/* розпізнавання — hollow again, one arc turns. Motion carries it, not a second hue */
+.pill[data-state="proc"] .p-ring{opacity:.26}
+.pill[data-state="proc"] .p-arc{opacity:1;animation:p-spin 1.05s linear infinite}
+/* готово — the single second colour in the whole system */
+.pill[data-state="done"] .p-ring{fill:var(--aqua);stroke:var(--aqua)}
+.pill[data-state="done"] .p-check{animation:p-draw .3s var(--ez) .05s forwards}
+.pill[data-state="done"] .p-glyph{animation:tp-pop .34s var(--ez)}
+/* тихий мікрофон — no colour event, no nudge: the ring goes quiet and a strike draws through */
+.pill[data-state="err"] .p-ring{stroke:var(--t2)}
+.pill[data-state="err"] .p-strike{animation:p-draw .3s var(--ez) .04s forwards}
+/* скасування — the dot simply shrinks away */
+.pill[data-state="cancel"] .p-ring{r:3;stroke:var(--t3)}
+
+/* --- level lane: a centre-weighted wave, driven by transform only --- */
+.p-bars{display:none;align-items:center;gap:3px;height:18px;flex:0 0 auto}
+.p-bars i{width:3px;height:18px;border-radius:2px;background:var(--coral);
+  transform:scaleY(calc(.17 + var(--h,.1) * var(--gain,1) * .83));
+  transition:transform .09s linear}
+.pill[data-state="rec"] .p-bars{display:flex}
+.p-bars i:nth-child(1),.p-bars i:nth-child(13){--gain:.46}
+.p-bars i:nth-child(2),.p-bars i:nth-child(12){--gain:.60}
+.p-bars i:nth-child(3),.p-bars i:nth-child(11){--gain:.73}
+.p-bars i:nth-child(4),.p-bars i:nth-child(10){--gain:.85}
+.p-bars i:nth-child(5),.p-bars i:nth-child(9){--gain:.93}
+.p-bars i:nth-child(6),.p-bars i:nth-child(8){--gain:.98}
+
+/* --- copy and timer --- */
+.p-lab{display:none;color:var(--t2)}
+.pill[data-state="idle"] .p-lab,.pill[data-state="proc"] .p-lab,.pill[data-state="done"] .p-lab,
+.pill[data-state="err"] .p-lab,.pill[data-state="cancel"] .p-lab{display:block}
+.pill[data-state="done"] .p-lab{color:var(--aqua-ink)}
+.pill[data-state="cancel"] .p-lab{color:var(--t3)}
+.p-key{display:none;margin-left:-3px}
+.pill[data-state="idle"] .p-key{display:inline-block}
+.pill .p-tm{display:none;color:var(--ink);font-weight:600;font-size:12.5px;letter-spacing:-.02em;
+  min-width:4ch;text-align:right}
+.pill[data-state="rec"] .p-tm,.pill[data-state="proc"] .p-tm{display:block}
+.pill[data-state="proc"] .p-tm{color:var(--t2)}
+
+/* ================= 2. ORB ================= */
+.orb{width:68px;height:68px;border-radius:50%;display:grid;place-items:center;padding:0;
+  transition:transform .3s var(--ez),border-color .2s}
+.orb svg.ring{position:absolute;inset:0;width:68px;height:68px;transform:rotate(-90deg)}
+.orb .trk{fill:none;stroke:var(--line);stroke-width:3}
+.orb .arc{fill:none;stroke-width:3;stroke-linecap:round;stroke-dasharray:176;stroke-dashoffset:176;
+  transition:stroke-dashoffset .3s var(--ez),stroke .2s}
+.orb .ctr{position:relative;display:grid;place-items:center;width:44px;height:44px}
+.orb .ctr>*{grid-area:1/1;display:none;place-items:center}
+.orb .ctr>*.on{display:grid}
+.orb .o-tm{font-size:12px;font-weight:700;letter-spacing:-.03em;color:var(--coral-ink)}
+.orb .o-mic{color:var(--t3)}
+.orb .o-chk{color:var(--aqua)}
+.orb .o-err{color:var(--amber)}
+.orb[data-state="idle"] .arc{stroke:var(--coral);stroke-dashoffset:176}
+.orb[data-state="idle"] .o-halo{display:grid}
+.orb .o-halo{position:absolute;inset:6px;border-radius:50%;box-shadow:inset 0 0 0 2px var(--coral);opacity:.3;
+  animation:tp-breath 3.6s ease-in-out infinite;display:none}
+.orb[data-state="rec"] .arc{stroke:var(--coral);stroke-dashoffset:calc(176 - 176 * (.18 + var(--lv,.2) * .82))}
+.orb[data-state="rec"]{transform:scale(calc(1 + var(--lv,.2)*.035))}
+.orb[data-state="rec"] .o-pulse{display:grid}
+.orb .o-pulse{position:absolute;inset:0;border-radius:50%;animation:tp-halo 1.5s ease-out infinite;display:none}
+.orb[data-state="proc"] .arc{stroke:var(--violet);animation:orb-prog 1.7s var(--ez) forwards}
+@keyframes orb-prog{from{stroke-dashoffset:176}to{stroke-dashoffset:0}}
+.orb[data-state="done"] .arc{stroke:var(--aqua);stroke-dashoffset:0;transition:stroke .18s}
+.orb[data-state="done"]{animation:tp-pop .36s var(--ez)}
+.orb[data-state="done"] .o-chk path{stroke-dasharray:24;animation:tp-draw .34s var(--ez) forwards}
+.orb[data-state="err"] .arc{stroke:var(--amber-line);stroke-dashoffset:0;stroke-dasharray:3 7}
+.orb[data-state="err"].shake{animation:tp-nudge .3s var(--ez)}
+.orb[data-state="cancel"] .arc{stroke:var(--t3);stroke-dashoffset:176}
+.orb[data-state="cancel"] .o-x{display:grid;color:var(--t3)}
+
+/* ================= 3. DOCK ================= */
+.dock{height:62px;border-radius:19px;display:flex;align-items:center;gap:12px;padding:0 12px 0 14px;
+  width:448px;max-width:100%;transition:width .3s var(--ez),border-color .2s}
+.dock[data-state="idle"]{width:262px}
+.dock[data-state="err"]{width:392px;border-color:var(--amber-line)}
+.dock[data-state="done"]{width:428px}
+.d-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;background:var(--coral);transition:background .2s}
+.dock[data-state="idle"] .d-dot{background:var(--line2);animation:tp-breath 3.4s ease-in-out infinite}
+.dock[data-state="rec"] .d-dot{animation:tp-halo 1.5s ease-out infinite}
+.dock[data-state="proc"] .d-dot{background:var(--violet)}
+.dock[data-state="done"] .d-dot{background:var(--aqua)}
+.dock[data-state="err"] .d-dot{background:var(--amber-line)}
+.d-lane{flex:1;min-width:0;height:34px;position:relative;display:grid}
+.d-lane>*{grid-area:1/1;align-self:center;opacity:0;transition:opacity .18s,transform .26s var(--ez)}
+.d-lane>*.on{opacity:1}
+.d-bars{display:flex;align-items:center;gap:3px;height:34px;transform:scaleY(.4)}
+.d-bars.on{transform:scaleY(1)}
+.d-bars i{flex:1;min-width:2px;border-radius:2px;background:var(--coral);opacity:.9;
+  height:calc(3px + var(--h,.1) * 31px);transition:height .08s linear}
+.d-track{height:4px;border-radius:3px;background:var(--field2);overflow:hidden;transform:scaleY(.5)}
+.d-track.on{transform:scaleY(1)}
+.d-track i{display:block;height:100%;border-radius:3px;background:var(--violet);width:0}
+.dock[data-state="proc"] .d-track i{animation:d-fill 1.7s var(--ez) forwards}
+@keyframes d-fill{from{width:6%}to{width:100%}}
+.d-text{font-size:12.5px;color:var(--t2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;transform:translateY(3px)}
+.d-text.on{transform:none}
+.d-text b{color:var(--ink);font-weight:500}
+.d-hint{display:flex;align-items:center;gap:7px;white-space:nowrap}
+.d-tm{flex-shrink:0;font-size:14px;font-weight:700;letter-spacing:-.03em;color:var(--ink);display:none}
+.dock[data-state="rec"] .d-tm,.dock[data-state="proc"] .d-tm{display:block}
+.d-acts{display:flex;gap:7px;flex-shrink:0}
+.dbtn{height:38px;padding:0 14px;border-radius:12px;border:1px solid var(--line2);background:transparent;
+  color:var(--t2);font-size:12px;font-weight:600;cursor:pointer;transition:.14s;white-space:nowrap}
+.dbtn:hover{color:var(--ink);border-color:var(--ink)}
+.dbtn.pri{background:var(--coral);border-color:var(--coral);color:#fff}
+.dbtn.pri:hover{background:var(--coral-d);border-color:var(--coral-d)}
+.dbtn:disabled{opacity:.42;cursor:default}
+.dbtn:disabled:hover{color:var(--t2);border-color:var(--line2)}
+.d-acts button{display:none}
+.dock[data-state="rec"] .d-cancel,.dock[data-state="rec"] .d-insert,
+.dock[data-state="proc"] .d-cancel,.dock[data-state="proc"] .d-insert{display:block}
+.dock[data-state="done"] .d-undo{display:block}
+.dock[data-state="err"] .d-retry{display:block}
+.dock[data-state="cancel"] .d-text{color:var(--t3)}
+
+/* ================= 4. LIVE CARD ================= */
+.lcard{width:312px;border-radius:18px;padding:11px 13px 12px;transition:border-color .2s}
+.lc-head{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.lc-dot{width:9px;height:9px;border-radius:50%;background:var(--line2);flex-shrink:0;transition:background .2s}
+.lcard[data-state="idle"] .lc-dot{animation:tp-breath 3.4s ease-in-out infinite;background:var(--coral)}
+.lcard[data-state="rec"] .lc-dot{background:var(--coral);animation:tp-halo 1.5s ease-out infinite}
+.lcard[data-state="proc"] .lc-dot{background:var(--violet)}
+.lcard[data-state="done"] .lc-dot{background:var(--aqua)}
+.lcard[data-state="err"] .lc-dot{background:var(--amber-line)}
+.lc-head .lbl{color:var(--t3);font-weight:600;font-size:11px;letter-spacing:.04em;text-transform:uppercase}
+.lc-head .tm{margin-left:auto;font-size:11.5px}
+.lc-body{position:relative;min-height:52px;display:flex;align-items:flex-start;overflow:hidden;
+  transition:min-height .28s var(--ez)}
+.lcard[data-state="idle"] .lc-body,.lcard[data-state="err"] .lc-body,
+.lcard[data-state="cancel"] .lc-body,.lcard.collapsed .lc-body{min-height:22px;align-items:center}
+.lc-tx{font-size:13px;line-height:1.55;color:var(--ink);letter-spacing:-.005em}
+.lc-tx .tok{opacity:0;filter:blur(3px);transition:opacity .18s ease-out,filter .22s ease-out,background-color .4s}
+.lc-tx .tok.vis{opacity:1;filter:none}
+.lc-tx .tok.fixed{background:var(--aqua-wash);border-radius:4px;box-shadow:0 0 0 2px var(--aqua-wash)}
+.lc-ph{font-size:12.5px;color:var(--t3)}
+.lc-res{align-items:center;gap:7px;font-size:12.5px;font-weight:600;color:var(--aqua-ink)}
+.lc-res span{color:var(--t3);font-weight:400}
+.lc-err{align-items:center;gap:7px;font-size:12.5px;font-weight:600;color:var(--amber)}
+.lc-err span{color:var(--t3);font-weight:400}
+.lc-body>*{display:none}
+.lc-body>*.on{display:block}
+.lc-body>.lc-res.on,.lc-body>.lc-err.on{display:flex}
+.lc-body>.lc-shim{display:block}
+.lc-shim{position:absolute;inset:-4px -13px;pointer-events:none;opacity:0;transition:opacity .2s}
+.lc-shim i{position:absolute;top:0;bottom:0;width:42%;background:var(--violet-wash);filter:blur(9px)}
+.lcard[data-state="proc"] .lc-shim{opacity:1}
+.lcard[data-state="proc"] .lc-shim i{animation:tp-sweep 1.25s ease-in-out infinite}
+.lcard[data-state="proc"] .lc-tx{color:var(--t2)}
+.lcard[data-state="err"]{border-color:var(--amber-line)}
+.lcard[data-state="err"].shake{animation:tp-nudge .3s var(--ez)}
+
+/* ================= 5. EDGE TAB ================= */
+.etab{display:flex;align-items:stretch;height:74px;width:9px;border-right:0;border-radius:14px 0 0 14px;
+  padding:0;overflow:hidden;transition:width .26s var(--ez),height .26s var(--ez),border-color .2s}
+.etab[data-state="rec"]{width:148px;height:96px}
+.etab[data-state="proc"]{width:142px;height:84px}
+.etab[data-state="done"]{width:134px;height:84px}
+.etab[data-state="err"]{width:178px;height:84px}
+.etab[data-state="cancel"]{width:126px;height:80px}
+.e-body{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:5px;padding:0 12px 0 14px;
+  opacity:0;transition:opacity .16s}
+.etab:not([data-state="idle"]) .e-body{opacity:1}
+.e-body .lbl{color:var(--t2)}
+.etab[data-state="done"] .e-body .lbl{color:var(--aqua-ink)}
+.etab[data-state="err"] .e-body .lbl{color:var(--amber)}
+.e-tm{font-size:19px;font-weight:700;letter-spacing:-.04em;color:var(--ink);display:none}
+.etab[data-state="rec"] .e-tm{display:block}
+.e-sub{font-size:11px;color:var(--t3);white-space:nowrap}
+.e-lane{display:none;align-items:flex-end;gap:3px;height:20px;margin-top:1px}
+.etab[data-state="rec"] .e-lane{display:flex}
+.e-lane i{width:3px;border-radius:2px;background:var(--coral);height:calc(3px + var(--h,.1) * 17px);
+  transition:height .08s linear}
+.e-spine{width:9px;flex-shrink:0;background:var(--field2);position:relative;overflow:hidden}
+.e-spine i{position:absolute;left:0;right:0;bottom:0;background:var(--coral);height:22%;
+  transition:height .09s linear,background .2s,top .2s}
+.etab[data-state="idle"] .e-spine i{height:100%;opacity:.5;animation:tp-breath 3.6s ease-in-out infinite;transform-origin:center}
+.etab[data-state="rec"] .e-spine i{height:calc(14% + var(--lv,.2) * 86%)}
+.etab[data-state="proc"] .e-spine i{background:var(--violet);bottom:auto;top:0;height:0;animation:e-fill 1.7s var(--ez) forwards}
+@keyframes e-fill{from{height:8%}to{height:100%}}
+.etab[data-state="done"] .e-spine i{background:var(--aqua);height:100%}
+.etab[data-state="err"] .e-spine i{background:var(--amber-line);height:100%}
+.etab[data-state="cancel"] .e-spine i{background:var(--t3);height:100%;opacity:.5}
+.etab[data-state="err"]{border-color:var(--amber-line)}
+.etab[data-state="err"].shake{animation:tp-nudge .3s var(--ez)}
+
+/* ---------- reduced motion: state still changes, the flourish drops ---------- */
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;
+    transition-duration:.001ms!important;scroll-behavior:auto!important}
+  .lc-shim{opacity:0!important}
+  .d-track i{width:100%!important}
+  .etab[data-state="proc"] .e-spine i{height:100%!important}
+  .orb[data-state="proc"] .arc{stroke-dashoffset:0!important}
+  .orb[data-state="done"] .o-chk path{stroke-dashoffset:0!important}
+  /* pill: the state still reads — check and strike sit drawn, the idle halo simply rests */
+  .pill[data-state="done"] .p-check,.pill[data-state="err"] .p-strike{stroke-dashoffset:0!important}
+  .pill[data-state="idle"] .p-halo{opacity:.4!important}
+}
+:root[data-rm="1"] *,:root[data-rm="1"] *::before,:root[data-rm="1"] *::after{
+  animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}
+:root[data-rm="1"] .lc-shim{opacity:0!important}
+:root[data-rm="1"] .d-track i{width:100%!important}
+:root[data-rm="1"] .pill[data-state="done"] .p-check,
+:root[data-rm="1"] .pill[data-state="err"] .p-strike{stroke-dashoffset:0!important}
+:root[data-rm="1"] .pill[data-state="idle"] .p-halo{opacity:.4!important}
+:root[data-rm="1"] .etab[data-state="proc"] .e-spine i{height:100%!important}
+:root[data-rm="1"] .orb[data-state="proc"] .arc{stroke-dashoffset:0!important}
+:root[data-rm="1"] .orb[data-state="done"] .o-chk path{stroke-dashoffset:0!important}
+</style>
+</head>
+<body>
+<!--
+THESIS: The tray panel judged at true size over real windows. Five directions that differ in what they reveal, not five pills. Refuses the floating-widget gallery shown on a neutral swatch at 2x.
+OWN-WORLD: Soft Studio, inherited. Warm off-white #FBF7F5 / plum #171319; coral #FF6B5E owns recording, violet #6D5AE6 owns processing, aqua #0FA598 owns the result, amber owns the silent mic. IBM Plex Sans, JetBrains Mono digits, 14-22px radii, offset+blur elevation, drawn SVG only.
+STORY: Roma sees each panel at 1:1 over a light document and a dark editor, steps every state, and can say which one he would tolerate in the corner of his eye all day.
+FIRST VIEWPORT: Sticky control bar (play all states, reduced motion, theme), a three-line frame, then variant 1 at full width with its two stages side by side.
+FORM: Extension inside an established world; the five directions are pinned by the brief, so no direction roll.
+FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md.
+-->
+
+<header class="top">
+  <div class="wrap">
+    <h1>Kuub<i>Wave</i> — трей-панель, 5 напрямків</h1>
+    <button class="ctl play" id="playAll" aria-pressed="false">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+      <span id="playLbl">Прогнати всі стани</span>
+    </button>
+    <button class="ctl" id="rmBtn" aria-pressed="false">Без анімації</button>
+    <button class="ctl" id="themeBtn" aria-pressed="false">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a8.5 8.5 0 1 0 11 11Z"/></svg>
+      <span id="themeLbl">Тема панелі: світла</span>
+    </button>
+  </div>
+</header>
+
+<div class="wrap intro">
+  <p>Панель показана в <b>реальному розмірі</b> поверх макета чужого вікна: світлого документа і темного редактора. Нічого не масштабовано, тому розмір і нав'язливість видно чесно.</p>
+  <p>Перемикач теми змінює <b>саму панель</b> (вона успадковує тему застосунку), а не фон під нею. Так видно всі чотири комбінації: світла панель на світлому й темному, темна на світлому й темному.</p>
+  <p>Кнопки станів під кожним варіантом перемикають обидві сцени одночасно. Стани: очікування, запис, розпізнавання, готово, тихий мікрофон і скасування.</p>
+</div>
+
+<main class="wrap">
+
+<!-- ========== 1 ========== -->
+<section class="variant" aria-labelledby="h-pill">
+  <div class="vhead"><h2 id="h-pill">1. Пігулка</h2><span class="size mono">за вмістом × 40</span></div>
+  <p class="vsub">Найменша можлива капсула: одна крапка, хвиля рівня і таймер. Колір тут один — кораловий, він і є енергія запису; стан веде сама геометрія крапки: порожнє кільце в очікуванні, залита крапка під запис, дуга, що обертається, на розпізнаванні, галочка на «готово», перекреслене кільце на тихому мікрофоні. Аква з'являється рівно один раз — у мить, коли текст уже вставлено. Ширина рахується з вмісту, тому підпис будь-якою мовою не обрізається, а помилка лишається одним з найтихіших і найвужчих станів.</p>
+  <div class="statebar" role="group" aria-label="Стани варіанта Пігулка" data-bar="pill"></div>
+  <div class="stages">
+    <figure class="stage"><figcaption class="cap">світлий фон</figcaption>
+      <div class="win lt" data-win="doc"><div class="anchor-b" data-slot="pill"></div></div>
+    </figure>
+    <figure class="stage"><figcaption class="cap">темний фон</figcaption>
+      <div class="win dk" data-win="code"><div class="anchor-b" data-slot="pill"></div></div>
+    </figure>
+  </div>
+  <p class="sr" role="status" data-live="pill"></p>
+  <div class="why">
+    <div><h3>Найкраще в</h3><p>Повній непомітності. Займає менше місця, ніж рядок тексту, і ніколи не перекриває те, що ви пишете.</p></div>
+    <div><h3>Компроміс</h3><p>Нічого не показує, крім факту запису. Помилку доводиться читати дрібним текстом, а результат не видно до вставки.</p></div>
+    <div><h3>Бічним зором</h3><p>Крапка і зміна ширини ловляться периферією, але тонкі стани зливаються.<span class="gr">оцінка <b><s class="on"></s><s class="on"></s><s class="on"></s><s></s><s></s></b></span></p></div>
+  </div>
+</section>
+
+<!-- ========== 2 ========== -->
+<section class="variant" aria-labelledby="h-orb">
+  <div class="vhead"><h2 id="h-orb">2. Кільце</h2><span class="size mono">68 × 68</span></div>
+  <p class="vsub">Коло, де інтерфейсом є саме кільце. Під час запису дуга росте від рівня голосу, на розпізнаванні та сама дуга стає визначеним прогресом, а на завершенні замикається в повне коло з галочкою. Скасування відмотує дугу назад. Жодного тексту, окрім таймера всередині.</p>
+  <div class="statebar" role="group" aria-label="Стани варіанта Кільце" data-bar="orb"></div>
+  <div class="stages">
+    <figure class="stage"><figcaption class="cap">світлий фон</figcaption>
+      <div class="win lt" data-win="doc"><div class="anchor-b" data-slot="orb"></div></div>
+    </figure>
+    <figure class="stage"><figcaption class="cap">темний фон</figcaption>
+      <div class="win dk" data-win="code"><div class="anchor-b" data-slot="orb"></div></div>
+    </figure>
+  </div>
+  <p class="sr" role="status" data-live="orb"></p>
+  <div class="why">
+    <div><h3>Найкраще в</h3><p>Характері при мінімальній площі. Одна форма, один жест, впізнається з першого разу і чудово працює як іконка бренду.</p></div>
+    <div><h3>Компроміс</h3><p>Без слів стани доводиться вивчити. Колір несе майже все навантаження, тому для людини з дальтонізмом різниця між обробкою і помилкою слабка.</p></div>
+    <div><h3>Бічним зором</h3><p>Кругла форма і рух дуги читаються найкраще з усіх п'яти.<span class="gr">оцінка <b><s class="on"></s><s class="on"></s><s class="on"></s><s class="on"></s><s></s></b></span></p></div>
+  </div>
+</section>
+
+<!-- ========== 3 ========== -->
+<section class="variant" aria-labelledby="h-dock">
+  <div class="vhead"><h2 id="h-dock">3. Док-смуга</h2><span class="size mono">262–448 × 62</span></div>
+  <p class="vsub">Широка горизонтальна смуга для тих, хто хоче керувати: доріжка хвилі, великий таймер і явні дії Скасувати та Вставити. Доріжка це одне й те саме місце, яке перетворюється: смужки хвилі стискаються в лінію прогресу, лінія розгортається в рядок результату.</p>
+  <div class="statebar" role="group" aria-label="Стани варіанта Док-смуга" data-bar="dock"></div>
+  <div class="stages">
+    <figure class="stage"><figcaption class="cap">світлий фон</figcaption>
+      <div class="win lt" data-win="doc"><div class="anchor-b" data-slot="dock"></div></div>
+    </figure>
+    <figure class="stage"><figcaption class="cap">темний фон</figcaption>
+      <div class="win dk" data-win="code"><div class="anchor-b" data-slot="dock"></div></div>
+    </figure>
+  </div>
+  <p class="sr" role="status" data-live="dock"></p>
+  <div class="why">
+    <div><h3>Найкраще в</h3><p>Контролі. Єдиний варіант, де скасувати чи вставити можна мишею, не пам'ятаючи гарячих клавіш, і де видно шматок результату до вставки.</p></div>
+    <div><h3>Компроміс</h3><p>Найбільша площа, перекриває рядок чужого вікна. Кнопки вимагають миші, тобто руки йдуть з клавіатури, а вікно не має права красти фокус, тож клік по ньому це окремий ризик.</p></div>
+    <div><h3>Бічним зором</h3><p>Помітна, але саме тому втомлює: ігнорувати її цілий день важко.<span class="gr">оцінка <b><s class="on"></s><s class="on"></s><s></s><s></s><s></s></b></span></p></div>
+  </div>
+</section>
+
+<!-- ========== 4 ========== -->
+<section class="variant" aria-labelledby="h-live">
+  <div class="vhead"><h2 id="h-live">4. Картка живого тексту</h2><span class="size mono">312 × 48–98</span></div>
+  <p class="vsub">Єдиний варіант, який показує саме диктування: слова з'являються по одному, поки ви говорите, останнє слово входить розмитим і різкішає. На розпізнаванні по тексту проходить хвиля полірування, і видно, як «кубвейв» виправляється на «KuubWave». Потім картка згортається в один рядок результату.</p>
+  <div class="statebar" role="group" aria-label="Стани варіанта Картка живого тексту" data-bar="live"></div>
+  <div class="stages">
+    <figure class="stage"><figcaption class="cap">світлий фон</figcaption>
+      <div class="win lt" data-win="doc"><div class="anchor-b" data-slot="live"></div></div>
+    </figure>
+    <figure class="stage"><figcaption class="cap">темний фон</figcaption>
+      <div class="win dk" data-win="code"><div class="anchor-b" data-slot="live"></div></div>
+    </figure>
+  </div>
+  <p class="sr" role="status" data-live="live"></p>
+  <div class="why">
+    <div><h3>Найкраще в</h3><p>Довірі. Ви бачите, що вас чують і як саме розчули, ще до вставки, тому помилку розпізнавання видно одразу, а не в чужому документі.</p></div>
+    <div><h3>Компроміс</h3><p>Текст, що біжить, притягує погляд і зчитується, тобто відволікає рівно тоді, коли треба думати про зміст. Висота стрибає залежно від довжини фрази.</p></div>
+    <div><h3>Бічним зором</h3><p>Ігнорувати неможливо за задумом, і це водночас її головна вада.<span class="gr">оцінка <b><s class="on"></s><s></s><s></s><s></s><s></s></b></span></p></div>
+  </div>
+</section>
+
+<!-- ========== 5 ========== -->
+<section class="variant" aria-labelledby="h-edge">
+  <div class="vhead"><h2 id="h-edge">5. Крайовий язичок</h2><span class="size mono">9 × 74 у спокої, до 178 × 96</span></div>
+  <p class="vsub">Прив'язаний до правого краю екрана. У спокої це смужка в дев'ять пікселів, яку легко не помічати місяцями. Під час запису тіло виростає вліво, а сама смужка залишається на місці й завжди несе сигнал: її заливка це рівень голосу, потім прогрес розпізнавання, потім результат. Ширина і є станом.</p>
+  <div class="statebar" role="group" aria-label="Стани варіанта Крайовий язичок" data-bar="edge"></div>
+  <div class="stages">
+    <figure class="stage"><figcaption class="cap">світлий фон</figcaption>
+      <div class="win lt" data-win="doc"><div class="anchor-r" data-slot="edge"></div></div>
+    </figure>
+    <figure class="stage"><figcaption class="cap">темний фон</figcaption>
+      <div class="win dk" data-win="code"><div class="anchor-r" data-slot="edge"></div></div>
+    </figure>
+  </div>
+  <p class="sr" role="status" data-live="edge"></p>
+  <div class="why">
+    <div><h3>Найкраще в</h3><p>Просторовій прив'язці. Завжди в одному місці, ніколи не перекриває центр екрана і не змагається з курсором за увагу.</p></div>
+    <div><h3>Компроміс</h3><p>Край екрана зайнятий іншими речами, а на кількох моніторах «правий край» неоднозначний. У спокої смужку легко сплутати зі смугою прокрутки.</p></div>
+    <div><h3>Бічним зором</h3><p>Ріст від краю ловиться добре, дрібні зміни на смужці майже ні.<span class="gr">оцінка <b><s class="on"></s><s class="on"></s><s class="on"></s><s class="on"></s><s></s></b></span></p></div>
+  </div>
+</section>
+
+</main>
+
+<script>
+(function(){
+"use strict";
+var root=document.documentElement;
+
+/* ---------- shared fake audio ---------- */
+var HIST=new Array(48), AUD={v:0.22};
+for(var i=0;i<HIST.length;i++)HIST[i]=0.08+Math.random()*0.10;
+var STATIC=[.18,.42,.66,.88,.62,.34,.52,.74,.46,.26,.58,.80,.50,.30,.64,.86,.44,.22,.54,.76,.48,.28,.60,.82,
+            .40,.24,.56,.78,.52,.32,.68,.84,.38,.20,.62,.72,.46,.26,.58,.80,.50,.30,.64,.86,.44,.22,.54,.76];
+function reduced(){
+  return root.getAttribute('data-rm')==='1' ||
+    (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+}
+function audioStep(t){
+  var env=0.46+0.46*Math.sin(t*1.9)*Math.sin(t*0.71+1.1);
+  var target=Math.max(0.05,Math.min(1,env+ (Math.random()*0.30-0.12)));
+  AUD.v+=(target-AUD.v)*0.28;
+  HIST.push(AUD.v); HIST.shift();
+}
+function level(){ return reduced()?0.5:AUD.v; }
+function hist(n,off){
+  var out=[],src=reduced()?STATIC:HIST;
+  for(var i=0;i<n;i++) out.push(src[src.length-n-(off||0)+i]);
+  return out;
+}
+
+/* ---------- SVG bits ---------- */
+var IC={
+  mic:'<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>',
+  micoff:'<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6a3 3 0 0 1 6 0v5m-6 0a3 3 0 0 0 4.2 2.75"/><path d="M5 11a7 7 0 0 0 10.5 6.05M19 11v.6M12 18v3"/><path d="M4 3l16 18"/></svg>',
+  check:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5 10 17.5 19 7"/></svg>',
+  x:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg>',
+  warn:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4 2.5 20h19L12 4Z"/><path d="M12 10v4.5M12 17.6v.1"/></svg>',
+  ok:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5 10 17.5 19 7"/></svg>'
+};
+function bars(n,cls){var s='';for(var i=0;i<n;i++)s+='<i></i>';return s;}
+
+/* ---------- panel markup ---------- */
+var SENT='Привіт! Це кубвейв, локальна диктовка, яка нічого не надсилає в мережу.'.split(' ');
+var FIX_AT=2, FIX_TO='KuubWave,';
+
+var TPL={
+  pill:'<div class="tp pill" data-panel="pill" data-state="idle">'+
+    '<span class="p-row">'+
+      '<span class="p-dot" aria-hidden="true"><span class="p-halo"></span>'+
+        '<svg class="p-glyph" viewBox="0 0 16 16" aria-hidden="true">'+
+          '<circle class="p-ring" cx="8" cy="8"/>'+
+          '<circle class="p-arc" cx="8" cy="8" r="5"/>'+
+          '<path class="p-check" d="M5.1 8.2 7.1 10.2 11 6.1"/>'+
+          '<path class="p-strike" d="M4.3 11.7 11.7 4.3"/>'+
+        '</svg></span>'+
+      '<span class="p-bars">'+bars(13)+'</span>'+
+      '<span class="p-lab lbl">Готовий</span>'+
+      '<span class="p-key keycap">Fn</span>'+
+      '<span class="p-tm tm mono">0:00</span>'+
+    '</span></div>',
+
+  orb:'<div class="tp orb" data-panel="orb" data-state="idle">'+
+    '<svg class="ring" viewBox="0 0 68 68" aria-hidden="true"><circle class="trk" cx="34" cy="34" r="28"/>'+
+    '<circle class="arc" cx="34" cy="34" r="28"/></svg>'+
+    '<span class="o-halo"></span><span class="o-pulse"></span>'+
+    '<span class="ctr"><span class="o-mic on">'+IC.mic+'</span>'+
+    '<span class="o-tm mono">0:00</span>'+
+    '<span class="o-chk">'+IC.check+'</span>'+
+    '<span class="o-err">'+IC.micoff+'</span>'+
+    '<span class="o-x">'+IC.x+'</span></span></div>',
+
+  dock:'<div class="tp dock" data-panel="dock" data-state="idle">'+
+    '<span class="d-dot"></span>'+
+    '<span class="d-lane">'+
+      '<span class="d-bars">'+bars(30)+'</span>'+
+      '<span class="d-track"><i></i></span>'+
+      '<span class="d-text"></span>'+
+    '</span>'+
+    '<span class="d-tm tm mono">0:00</span>'+
+    '<span class="d-acts">'+
+      '<button type="button" class="dbtn d-cancel">Скасувати</button>'+
+      '<button type="button" class="dbtn pri d-insert">Вставити</button>'+
+      '<button type="button" class="dbtn d-undo">Відмінити</button>'+
+      '<button type="button" class="dbtn pri d-retry">Ще раз</button>'+
+    '</span></div>',
+
+  live:'<div class="tp lcard" data-panel="live" data-state="idle">'+
+    '<span class="lc-head"><span class="lc-dot"></span><span class="lbl">KuubWave</span>'+
+    '<span class="tm mono lc-tm">0:00</span></span>'+
+    '<span class="lc-body">'+
+      '<span class="lc-ph on">Тримайте Fn і говоріть</span>'+
+      '<span class="lc-tx"></span>'+
+      '<span class="lc-res">'+IC.ok+' Вставлено <span>11 слів</span></span>'+
+      '<span class="lc-err">'+IC.warn+' Нічого не почув <span>перевірте мікрофон</span></span>'+
+      '<span class="lc-shim"><i></i></span>'+
+    '</span></div>',
+
+  edge:'<div class="tp etab" data-panel="edge" data-state="idle">'+
+    '<span class="e-body"><span class="lbl">Готовий</span>'+
+    '<span class="e-tm mono">0:00</span>'+
+    '<span class="e-lane">'+bars(9)+'</span>'+
+    '<span class="e-sub"></span></span>'+
+    '<span class="e-spine"><i></i></span></div>'
+};
+
+/* ---------- faux windows ---------- */
+var WIN={
+  doc:'<div class="wbar"><i></i><i></i><i></i><span>Лист до команди.docx — Редактор</span></div>'+
+      '<div class="wbody doc"><h4>Лист до команди</h4>'+
+      '<p>Добрий день! Коротко про статус на цьому тижні: збірка для Windows готова, лишилося дочекатися підпису.</p>'+
+      '<p class="now">Наступний крок — <span class="caret"></span></p></div>',
+  code:'<div class="wbar"><i></i><i></i><i></i><span>flow.py — KuubWave</span></div>'+
+      '<div class="wbody code">'+
+      '<div class="ln"><span class="g">41</span><span class="kw">def </span><span class="fn">transcribe</span><span class="tx">(path, lang):</span></div>'+
+      '<div class="ln"><span class="g">42</span><span class="tx">    audio = </span><span class="fn">load</span><span class="tx">(path)</span></div>'+
+      '<div class="ln"><span class="g">43</span><span class="tx">    model = </span><span class="fn">pick_model</span><span class="tx">(lang)</span></div>'+
+      '<div class="ln"><span class="g">44</span><span class="kw">    if </span><span class="tx">audio.peak &lt; </span><span class="st">0.01</span><span class="tx">:</span></div>'+
+      '<div class="ln"><span class="g">45</span><span class="kw">        raise </span><span class="fn">QuietMic</span><span class="tx">(</span><span class="st">"тихо"</span><span class="tx">)</span></div>'+
+      '<div class="ln"><span class="g">46</span><span class="tx">    </span><span class="caret"></span></div></div>'
+};
+
+/* ---------- build ---------- */
+var STATES=[
+  {k:'idle',n:'Очікування'},{k:'rec',n:'Запис'},{k:'proc',n:'Розпізнавання'},
+  {k:'done',n:'Готово'},{k:'err',n:'Тихий мікрофон'},{k:'cancel',n:'Скасування'}
+];
+var LIVE_TXT={idle:'очікування',rec:'запис',proc:'розпізнавання',done:'готово, вставлено',
+  err:'помилка, тихий мікрофон',cancel:'скасовано'};
+
+document.querySelectorAll('[data-win]').forEach(function(w){
+  w.insertAdjacentHTML('afterbegin', WIN[w.getAttribute('data-win')]);
+});
+document.querySelectorAll('[data-slot]').forEach(function(s){
+  s.insertAdjacentHTML('beforeend', TPL[s.getAttribute('data-slot')]);
+});
+
+var panels={};            /* id -> [el,...] */
+var meta=new WeakMap();   /* el -> runtime */
+document.querySelectorAll('[data-panel]').forEach(function(el){
+  var id=el.getAttribute('data-panel');
+  (panels[id]=panels[id]||[]).push(el);
+  var m={t0:0,tok:0,timer:null,frozen:'0:00',fit:null};
+  meta.set(el,m);
+  if(id==='pill'){
+    /* The pill sizes itself to its own content: the row keeps its natural width, the
+       panel width is read back from it. Any copy, any language, any timer length —
+       it cannot clip, and the resize still animates like the real OS window. */
+    var row=el.querySelector('.p-row'), cs=getComputedStyle(el);
+    m.fit=function(){
+      var extra=parseFloat(cs.paddingLeft)+parseFloat(cs.paddingRight)+
+                parseFloat(cs.borderLeftWidth)+parseFloat(cs.borderRightWidth);
+      el.style.width=(Math.ceil(row.getBoundingClientRect().width)+extra)+'px';
+    };
+    if(window.ResizeObserver)new ResizeObserver(m.fit).observe(row);
+  }
+  if(id==='live'){
+    var tx=el.querySelector('.lc-tx');
+    tx.innerHTML=SENT.map(function(w,i){return '<span class="tok">'+w+'</span>';}).join(' ');
+  }
+});
+
+/* ---------- state machine ---------- */
+var current={};
+function fmt(ms){var s=Math.floor(ms/1000);return Math.floor(s/60)+':'+('0'+(s%60)).slice(-2);}
+
+function apply(el,st){
+  var m=meta.get(el),id=el.getAttribute('data-panel');
+  if(m.timer){clearTimeout(m.timer);m.timer=null;}
+  el.classList.remove('shake','collapsed');
+  if(el.getAttribute('data-state')===st){ void el.offsetWidth; }
+  el.setAttribute('data-state',st);
+
+  if(st==='rec'){ m.t0=performance.now(); m.tok=0; }
+  if(st!=='rec'){ m.frozen=(st==='proc')?m.frozen:'0:00'; }
+
+  if(id==='pill'){
+    var lab=el.querySelector('.p-lab');
+    lab.textContent={idle:'Готовий',proc:'Розпізнаю',done:'Вставлено',err:'Тихо в мікрофоні',cancel:'Скасовано',rec:''}[st];
+    el.querySelector('.p-tm').textContent=(st==='proc')?m.frozen:'0:00';
+    if(m.fit)m.fit();
+  }
+  if(id==='orb'){
+    var ctr=el.querySelector('.ctr');
+    ctr.querySelectorAll('span').forEach(function(s){s.classList.remove('on');});
+    var pick={idle:'.o-mic',rec:'.o-tm',proc:'.o-tm',done:'.o-chk',err:'.o-err',cancel:'.o-x'}[st];
+    ctr.querySelector(pick).classList.add('on');
+    if(st==='proc')el.querySelector('.o-tm').textContent=m.frozen;
+  }
+  if(id==='dock'){
+    var lane=el.querySelector('.d-lane');
+    lane.querySelectorAll(':scope > *').forEach(function(s){s.classList.remove('on');});
+    var txt=el.querySelector('.d-text');
+    if(st==='rec'){ lane.querySelector('.d-bars').classList.add('on'); }
+    else if(st==='proc'){ lane.querySelector('.d-track').classList.add('on'); }
+    else {
+      txt.classList.add('on');
+      txt.innerHTML={
+        idle:'<span class="d-hint"><span class="hint">Тримайте</span><span class="keycap">Fn</span><span class="hint">і говоріть</span></span>',
+        done:'<b>Привіт! Це KuubWave, локальна диктовка...</b>',
+        err:'Мікрофон мовчить. Перевірте пристрій.',
+        cancel:'Скасовано, нічого не вставлено.'
+      }[st];
+    }
+    el.querySelector('.d-tm').textContent=(st==='proc')?m.frozen:'0:00';
+    el.querySelector('.d-insert').disabled=(st==='proc');
+  }
+  if(id==='live'){
+    var body=el.querySelector('.lc-body');
+    body.querySelectorAll(':scope > *').forEach(function(s){
+      if(!s.classList.contains('lc-shim'))s.classList.remove('on');
+    });
+    var toks=el.querySelectorAll('.lc-tx .tok');
+    var show={idle:'.lc-ph',rec:'.lc-tx',proc:'.lc-tx',done:'.lc-tx',err:'.lc-err',cancel:'.lc-ph'}[st];
+    body.querySelector(show).classList.add('on');
+    if(st==='cancel')body.querySelector('.lc-ph').textContent='Скасовано, нічого не вставлено';
+    else body.querySelector('.lc-ph').textContent='Тримайте Fn і говоріть';
+    if(st==='rec'){
+      toks.forEach(function(t,i){t.classList.remove('vis','fixed');t.textContent=SENT[i];});
+      if(reduced()){ toks.forEach(function(t){t.classList.add('vis');}); m.tok=SENT.length; }
+    }
+    if(st==='proc'){ toks.forEach(function(t){t.classList.add('vis');}); }
+    if(st!=='rec'&&st!=='proc'){ toks.forEach(function(t,i){t.classList.remove('fixed');t.textContent=SENT[i];}); }
+    /* the card's own beat: the correction lands visibly, then the card collapses to the result */
+    if(st==='done'){
+      toks.forEach(function(t){t.classList.add('vis');});
+      var f=toks[FIX_AT]; if(f){f.textContent=FIX_TO;f.classList.add('fixed');}
+      m.timer=setTimeout(function(){
+        body.querySelector('.lc-tx').classList.remove('on');
+        body.querySelector('.lc-res').classList.add('on');
+        el.classList.add('collapsed');
+      },reduced()?420:950);
+    }
+    el.querySelector('.lc-tm').textContent=(st==='proc')?m.frozen:'0:00';
+  }
+  if(id==='edge'){
+    el.querySelector('.e-body .lbl').textContent=
+      {idle:'Готовий',rec:'Запис',proc:'Розпізнаю',done:'Вставлено',err:'Тихо в мікрофоні',cancel:'Скасовано'}[st];
+    el.querySelector('.e-sub').textContent={proc:'локальна модель',done:'11 слів',err:'перевірте мікрофон',cancel:'',idle:'',rec:''}[st];
+    el.querySelector('.e-tm').textContent='0:00';
+  }
+  if(st==='err'&&!reduced()){ void el.offsetWidth; el.classList.add('shake'); }
+}
+
+function setState(id,st){
+  current[id]=st;
+  panels[id].forEach(function(el){apply(el,st);});
+  var bar=document.querySelector('[data-bar="'+id+'"]');
+  if(bar)bar.querySelectorAll('button').forEach(function(b){
+    b.setAttribute('aria-pressed',String(b.getAttribute('data-st')===st));
+  });
+  var lv=document.querySelector('[data-live="'+id+'"]');
+  if(lv)lv.textContent='Стан: '+LIVE_TXT[st];
+}
+
+/* ---------- per-variant controls ---------- */
+Object.keys(panels).forEach(function(id){
+  var bar=document.querySelector('[data-bar="'+id+'"]');
+  STATES.forEach(function(s){
+    var b=document.createElement('button');
+    b.type='button'; b.className='sb'+(s.k==='cancel'||s.k==='idle'?' ghost':'');
+    b.textContent=s.n; b.setAttribute('data-st',s.k); b.setAttribute('aria-pressed','false');
+    b.addEventListener('click',function(){stopPlay();setState(id,s.k);});
+    bar.appendChild(b);
+  });
+  setState(id,'idle');
+});
+
+/* live-card in-panel affordance: dock buttons drive the real paths */
+document.querySelectorAll('.d-cancel').forEach(function(b){b.addEventListener('click',function(){stopPlay();setState('dock','cancel');});});
+document.querySelectorAll('.d-insert').forEach(function(b){b.addEventListener('click',function(){stopPlay();setState('dock','proc');});});
+document.querySelectorAll('.d-undo').forEach(function(b){b.addEventListener('click',function(){stopPlay();setState('dock','idle');});});
+document.querySelectorAll('.d-retry').forEach(function(b){b.addEventListener('click',function(){stopPlay();setState('dock','rec');});});
+
+/* ---------- render loop ---------- */
+var frame=0;
+function loop(now){
+  frame++;
+  if(!reduced()&&frame%2===0)audioStep(now/1000);
+  Object.keys(panels).forEach(function(id){
+    var st=current[id];
+    panels[id].forEach(function(el){
+      var m=meta.get(el);
+      if(st==='rec'){
+        var lv=level();
+        el.style.setProperty('--lv',lv.toFixed(3));
+        var tstr=fmt(now-m.t0); m.frozen=tstr;
+        if(frame%6===0){
+          if(id==='pill')el.querySelector('.p-tm').textContent=tstr;
+          if(id==='orb')el.querySelector('.o-tm').textContent=tstr;
+          if(id==='dock')el.querySelector('.d-tm').textContent=tstr;
+          if(id==='live')el.querySelector('.lc-tm').textContent=tstr;
+          if(id==='edge')el.querySelector('.e-tm').textContent=tstr;
+        }
+        if(frame%2===0){
+          if(id==='pill')setBars(el.querySelectorAll('.p-bars i'),hist(13));
+          if(id==='dock')setBars(el.querySelectorAll('.d-bars i'),hist(30));
+          if(id==='edge')setBars(el.querySelectorAll('.e-lane i'),hist(9));
+        }
+        if(id==='live'&&!reduced()){
+          var want=Math.min(SENT.length,Math.floor((now-m.t0)/230));
+          if(want>m.tok){
+            var toks=el.querySelectorAll('.lc-tx .tok');
+            for(var i=m.tok;i<want;i++)if(toks[i])toks[i].classList.add('vis');
+            m.tok=want;
+          }
+        }
+      }
+    });
+  });
+  requestAnimationFrame(loop);
+}
+function setBars(nodes,vals){
+  for(var i=0;i<nodes.length;i++)nodes[i].style.setProperty('--h',(vals[i]||0.08).toFixed(3));
+}
+requestAnimationFrame(loop);
+
+/* the card's one product-specific beat: the correction lands on done */
+function markFix(){
+  panels.live.forEach(function(el){
+    var toks=el.querySelectorAll('.lc-tx .tok');
+    if(toks[FIX_AT]){toks[FIX_AT].textContent=FIX_TO;toks[FIX_AT].classList.add('fixed');}
+  });
+}
+
+/* ---------- global play ---------- */
+var SEQ=[['idle',900],['rec',3000],['proc',1900],['done',1700],['err',1900],['rec',1400],['cancel',1200]];
+var playing=false,seqI=0,seqT=null;
+var playBtn=document.getElementById('playAll'),playLbl=document.getElementById('playLbl');
+
+function step(){
+  var s=SEQ[seqI%SEQ.length];
+  Object.keys(panels).forEach(function(id){setState(id,s[0]);});
+  if(s[0]==='done')markFix();
+  seqI++;
+  seqT=setTimeout(step,s[1]);
+}
+function startPlay(){
+  playing=true;seqI=0;playBtn.setAttribute('aria-pressed','true');playLbl.textContent='Зупинити';
+  step();
+}
+function stopPlay(){
+  if(!playing)return;
+  playing=false;clearTimeout(seqT);seqT=null;
+  playBtn.setAttribute('aria-pressed','false');playLbl.textContent='Прогнати всі стани';
+}
+playBtn.addEventListener('click',function(){playing?stopPlay():startPlay();});
+
+/* ---------- sheet controls ---------- */
+var themeBtn=document.getElementById('themeBtn'),themeLbl=document.getElementById('themeLbl');
+themeBtn.addEventListener('click',function(){
+  var dark=root.getAttribute('data-theme')==='dark';
+  root.setAttribute('data-theme',dark?'light':'dark');
+  themeBtn.setAttribute('aria-pressed',String(!dark));
+  themeLbl.textContent='Тема панелі: '+(dark?'світла':'темна');
+});
+var rmBtn=document.getElementById('rmBtn');
+rmBtn.addEventListener('click',function(){
+  var on=root.getAttribute('data-rm')==='1';
+  root.setAttribute('data-rm',on?'0':'1');
+  rmBtn.setAttribute('aria-pressed',String(!on));
+  Object.keys(panels).forEach(function(id){setState(id,current[id]);});
+});
+})();
+</script>
+</body>
+</html>

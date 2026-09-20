@@ -12,7 +12,9 @@ from PyInstaller.utils.hooks import collect_all
 
 ROOT = os.path.dirname(SPECPATH)  # spec lives in packaging/, code in repo root
 
-datas = [(os.path.join(ROOT, "web"), "web"), (os.path.join(ROOT, "kuubwave.ico"), ".")]
+datas = [(os.path.join(ROOT, "web"), "web"),
+         (os.path.join(ROOT, "kuubwave.ico"), "."),
+         (os.path.join(ROOT, "kuubwave_tray.png"), ".")]
 binaries = []
 hiddenimports = ["comtypes", "pystray._win32", "cuda_setup", "webview_app",
                  "ui", "licensing", "pycaw", "pycaw.pycaw",

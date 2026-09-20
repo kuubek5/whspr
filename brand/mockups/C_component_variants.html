@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="uk" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KuubWave — варіанти компонентів</title>
+<style>
+:root{
+  --bg:#FBF7F5; --card:#FFFFFF; --ink:#1B1720; --t2:#6B6470; --t3:#9A93A0;
+  --line:rgba(27,23,32,.09); --line2:rgba(27,23,32,.15); --field:#FFFFFF; --field2:#F6F1EE;
+  --coral:#FF6B5E; --coral-d:#EE5348; --coral-ink:#D8382D; --coral-wash:#FFECE9;
+  --aqua:#0FA598; --aqua-wash:rgba(15,165,152,.12); --violet:#6D5AE6;
+  --sh:0 1px 2px rgba(27,23,32,.05),0 10px 26px rgba(27,23,32,.07);
+  --sh-sm:0 1px 2px rgba(27,23,32,.06),0 4px 12px rgba(27,23,32,.05);
+  --r:16px; --r-lg:22px;
+}
+:root[data-theme="dark"]{
+  --bg:#171319; --card:#221C29; --ink:#F4EEF2; --t2:#B0A6B4; --t3:#786E7E;
+  --line:rgba(255,255,255,.09); --line2:rgba(255,255,255,.16); --field:#2A2331; --field2:#221C29;
+  --coral:#FF7A6E; --coral-d:#F0574C; --coral-ink:#FF9488; --coral-wash:rgba(255,122,110,.16);
+  --aqua:#33CBBB; --aqua-wash:rgba(51,203,187,.15); --violet:#9784F5;
+  --sh:0 1px 2px rgba(0,0,0,.4),0 14px 34px rgba(0,0,0,.42);
+  --sh-sm:0 1px 2px rgba(0,0,0,.4),0 5px 14px rgba(0,0,0,.35);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'IBM Plex Sans',system-ui,'Segoe UI',sans-serif;background:var(--bg);color:var(--ink);
+  -webkit-font-smoothing:antialiased;padding:34px 40px 80px;transition:background .3s,color .2s}
+.mono{font-family:'JetBrains Mono','Cascadia Code',Consolas,monospace}
+h1{font-size:24px;font-weight:700;letter-spacing:-.03em;margin-bottom:4px}
+.lede{font-size:13px;color:var(--t3);margin-bottom:30px}
+.themebtn{position:fixed;top:26px;right:34px;width:40px;height:40px;border-radius:12px;border:1px solid var(--line);
+  background:var(--card);color:var(--t2);cursor:pointer;box-shadow:var(--sh-sm);font-size:16px}
+.sec{margin-bottom:44px}
+.sec>h2{font-size:12px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--coral-ink);margin-bottom:16px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:18px;align-items:start}
+.vc{background:var(--card);border-radius:var(--r-lg);padding:20px;box-shadow:var(--sh-sm)}
+.vc>.vt{font-size:12px;font-weight:600;color:var(--t3);margin-bottom:16px;display:flex;align-items:center;gap:8px}
+.vc>.vt b{color:var(--ink);font-size:13px}
+.pill{font-size:10px;font-weight:700;color:var(--coral);background:var(--coral-wash);border-radius:6px;padding:3px 7px}
+
+/* ---- model: radio rows (V1) ---- */
+.mrow{display:flex;align-items:center;gap:13px;padding:12px;border-radius:14px;cursor:pointer;transition:.14s;border:1px solid transparent}
+.mrow+.mrow{margin-top:4px}
+.mrow:hover{background:var(--field2)}
+.mrow.sel{background:var(--coral-wash)}
+.radio{width:20px;height:20px;border-radius:50%;border:2px solid var(--line2);flex-shrink:0;position:relative;transition:.14s}
+.mrow.sel .radio{border-color:var(--coral)}
+.mrow.sel .radio::after{content:"";position:absolute;inset:3px;border-radius:50%;background:var(--coral)}
+.mrow .info{flex:1;min-width:0}
+.mrow .nm{font-size:13.5px;font-weight:600}
+.mrow.sel .nm{color:var(--coral-ink)}
+.mrow .meta{font-size:11.5px;color:var(--t3);margin-top:2px}
+.mrow .sz{font-size:11px;color:var(--t3);font-variant-numeric:tabular-nums;flex-shrink:0}
+
+/* ---- model: selectable cards (V2) ---- */
+.mcards{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.mcard{position:relative;border:1.5px solid var(--line);border-radius:15px;padding:14px;cursor:pointer;transition:.14s;background:var(--field)}
+.mcard:hover{border-color:var(--line2)}
+.mcard.sel{border-color:var(--coral);background:var(--coral-wash)}
+.mcard .chk{position:absolute;top:10px;right:10px;width:20px;height:20px;border-radius:50%;background:var(--coral);color:#fff;display:none;align-items:center;justify-content:center}
+.mcard.sel .chk{display:flex}
+.mcard .nm{font-size:13px;font-weight:600;margin-bottom:5px;padding-right:22px}
+.mcard .meta{font-size:11px;color:var(--t3);line-height:1.4}
+.mcard .dl{margin-top:9px;font-size:11px;font-weight:600;color:var(--aqua)}
+
+/* ---- model: spotlight + switch (V3) ---- */
+.spot{border-radius:16px;padding:16px;background:linear-gradient(120% 140% at 100% 0%,rgba(255,107,94,.12),transparent 70%),var(--field);border:1px solid var(--coral-wash)}
+.spot .top{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px}
+.spot .nm{font-size:15px;font-weight:700}
+.badge{font-size:10.5px;font-weight:700;color:#fff;background:var(--coral);border-radius:8px;padding:4px 9px}
+.spot .meta{font-size:12px;color:var(--t2);line-height:1.5}
+.switch{margin-top:12px;display:flex;flex-direction:column;gap:0}
+.switch .opt{display:flex;align-items:center;justify-content:space-between;padding:9px 4px;border-top:1px solid var(--line);font-size:12.5px;color:var(--t2);cursor:pointer}
+.switch .opt:hover{color:var(--ink)}
+.switch .opt .use{font-size:11px;color:var(--coral);font-weight:600;opacity:0;transition:.14s}
+.switch .opt:hover .use{opacity:1}
+
+/* ---- keycaps ---- */
+.keycap{display:inline-flex;align-items:center;justify-content:center;min-width:34px;height:36px;padding:0 11px;
+  border-radius:9px;background:var(--field);border:1px solid var(--line2);border-bottom-width:3px;
+  font-family:'JetBrains Mono',monospace;font-size:14px;font-weight:600;color:var(--ink)}
+.krow{display:flex;align-items:center;gap:7px}
+.kplus{color:var(--t3);font-size:13px}
+/* hotkey V1 big */
+.hk1{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.hk1 .big .keycap{height:52px;min-width:52px;font-size:18px}
+.btn{font-family:inherit;border:none;border-radius:11px;padding:9px 16px;font-size:12.5px;font-weight:600;cursor:pointer;transition:.15s}
+.btn.pri{background:var(--coral);color:#fff}.btn.pri:hover{background:var(--coral-d)}
+.btn.ghost{background:var(--field);color:var(--ink);border:1px solid var(--line)}.btn.ghost:hover{border-color:var(--line2)}
+/* hotkey V2 recorder */
+.rec{display:flex;align-items:center;gap:12px;padding:14px;border-radius:14px;border:1.5px dashed var(--line2);cursor:pointer;transition:.15s}
+.rec.listen{border-style:solid;border-color:var(--coral);background:var(--coral-wash)}
+.rec .dot{width:11px;height:11px;border-radius:50%;background:var(--t3);flex-shrink:0}
+.rec.listen .dot{background:var(--coral);animation:blink 1s infinite}
+@keyframes blink{50%{opacity:.3}}
+.rec .lbl{font-size:13px;color:var(--t2)}
+.rec.listen .lbl{color:var(--coral-ink);font-weight:600}
+/* hotkey V3 presets */
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+.chip{font-family:inherit;font-size:12.5px;padding:8px 13px;border-radius:10px;border:1px solid var(--line);background:var(--field);color:var(--t2);cursor:pointer;transition:.14s;display:flex;align-items:center;gap:6px}
+.chip:hover{border-color:var(--line2);color:var(--ink)}
+.chip.sel{background:var(--coral);color:#fff;border-color:var(--coral)}
+.previewk{padding-top:12px;border-top:1px solid var(--line);display:flex;align-items:center;gap:10px;font-size:12px;color:var(--t3)}
+
+/* ---- selected-state patterns ---- */
+.pats{display:flex;flex-direction:column;gap:18px}
+.pat{display:flex;align-items:center;justify-content:space-between;gap:14px}
+.pat .pl{font-size:12.5px;color:var(--t2)}
+.tg{width:44px;height:26px;border-radius:13px;background:var(--line2);border:none;cursor:pointer;padding:3px;transition:.2s}
+.tg.on{background:var(--coral)}
+.tg .th{display:block;width:20px;height:20px;border-radius:50%;background:#fff;transition:transform .2s cubic-bezier(.34,1.56,.64,1);box-shadow:0 1px 3px rgba(0,0,0,.25)}
+.tg.on .th{transform:translateX(18px)}
+.seg{display:inline-flex;background:var(--field2);border-radius:11px;padding:3px}
+.seg button{border:none;background:none;font-family:inherit;font-size:12px;font-weight:600;color:var(--t2);padding:7px 14px;border-radius:8px;cursor:pointer;transition:.14s}
+.seg button.on{background:var(--card);color:var(--coral-ink);box-shadow:var(--sh-sm)}
+.cbx{width:22px;height:22px;border-radius:7px;border:2px solid var(--line2);cursor:pointer;position:relative;transition:.14s}
+.cbx.on{background:var(--coral);border-color:var(--coral)}
+.cbx.on::after{content:"";position:absolute;left:7px;top:3px;width:5px;height:10px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(45deg)}
+.dchips{display:flex;gap:8px}
+
+/* ---- status widgets (device / language / latency) ---- */
+.sw-demorow{display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:14px;background:var(--field2);margin-bottom:14px;font-size:12px;color:var(--t3)}
+.sw-demorow .brandmini{display:flex;align-items:center;gap:8px;font-weight:700;color:var(--ink);font-size:13px}
+.sw-demorow .brandmini i{color:var(--coral);font-style:normal}
+/* V1 topbar chips */
+.swchips{display:flex;gap:8px;flex-wrap:wrap}
+.swchip{display:flex;align-items:center;gap:8px;background:var(--field);border:1px solid var(--line);border-radius:11px;padding:8px 12px}
+.swchip .dot{width:7px;height:7px;border-radius:50%;background:var(--aqua);flex-shrink:0}
+.swchip .k{font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.06em}
+.swchip .v{font-size:12.5px;font-weight:600;color:var(--ink)}
+.swchip .v.c{color:var(--coral-ink)}
+/* V2 status bar (segmented card) */
+.swbar{display:flex;background:var(--field);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.swcell{flex:1;padding:12px 16px;border-right:1px solid var(--line)}
+.swcell:last-child{border-right:none}
+.swcell .k{font-size:10px;color:var(--t3);text-transform:uppercase;letter-spacing:.07em;margin-bottom:4px}
+.swcell .v{font-size:13.5px;font-weight:600;font-variant-numeric:tabular-nums}
+.swcell .v.c{color:var(--coral-ink)} .swcell .v.a{color:var(--aqua)}
+/* V3 sidebar stack */
+.swside{width:200px;background:var(--card);border-radius:16px;padding:8px;box-shadow:var(--sh-sm)}
+.swside .r{display:flex;align-items:center;gap:10px;padding:10px 11px;border-radius:11px}
+.swside .r+.r{border-top:1px solid var(--line)}
+.swside .ic{width:28px;height:28px;border-radius:9px;background:var(--field2);color:var(--t2);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.swside .tx{flex:1;min-width:0}
+.swside .k{font-size:10.5px;color:var(--t3)}
+.swside .v{font-size:12.5px;font-weight:600}
+/* V4 hero meta chips (on coral) */
+.swhero{border-radius:18px;padding:18px 20px;background:radial-gradient(120% 140% at 12% 0%,#FF8A6B,var(--coral) 55%,var(--coral-d));color:#fff}
+.swhero .lead{font-size:14px;font-weight:600;margin-bottom:12px}
+.swhero .row{display:flex;gap:8px;flex-wrap:wrap}
+.swhero .hc{display:flex;flex-direction:column;gap:2px;background:rgba(255,255,255,.16);border-radius:10px;padding:8px 12px}
+.swhero .hc .k{font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;color:rgba(255,255,255,.75)}
+.swhero .hc .v{font-size:13px;font-weight:600}
+</style>
+</head>
+<body>
+<button class="themebtn" onclick="var r=document.documentElement;r.setAttribute('data-theme',r.getAttribute('data-theme')==='dark'?'light':'dark')">◐</button>
+<h1>KuubWave — варіанти компонентів</h1>
+<div class="lede">Однакова дизайн-мова Soft Studio. Клікай — вибір живий. Скажеш, який варіант кожного лишаємо.</div>
+
+<div class="sec">
+  <h2>Вибір моделі — активна / обрана</h2>
+  <div class="grid">
+    <!-- V1 radio rows -->
+    <div class="vc"><div class="vt"><b>Варіант 1</b> · радіо-рядки</div>
+      <div id="m1"></div></div>
+    <!-- V2 cards -->
+    <div class="vc"><div class="vt"><b>Варіант 2</b> · картки з галочкою</div>
+      <div class="mcards" id="m2"></div></div>
+    <!-- V3 spotlight -->
+    <div class="vc"><div class="vt"><b>Варіант 3</b> · активна у фокусі + перемикач</div>
+      <div class="spot">
+        <div class="top"><div class="nm">Large v3 Turbo UA</div><span class="badge">Активна</span></div>
+        <div class="meta">донавчена на розмовній українській · 1.5 GB на диску</div>
+        <div class="switch" id="m3"></div>
+      </div></div>
+  </div>
+</div>
+
+<div class="sec">
+  <h2>Гаряча клавіша</h2>
+  <div class="grid">
+    <!-- V1 keycaps + change -->
+    <div class="vc"><div class="vt"><b>Варіант 1</b> · keycap + «Змінити»</div>
+      <div class="hk1"><div class="big krow"><span class="keycap">Fn</span></div>
+        <button class="btn ghost" onclick="this.textContent='Слухаю…';this.classList.add('pri');this.classList.remove('ghost')">Змінити</button></div>
+      <div style="margin-top:14px;font-size:11.5px;color:var(--t3)">Утримуйте цю клавішу, щоб диктувати</div></div>
+    <!-- V2 recorder -->
+    <div class="vc"><div class="vt"><b>Варіант 2</b> · інлайн-запис комбінації</div>
+      <div class="rec" id="rec" onclick="this.classList.toggle('listen');var l=this.querySelector('.lbl');l.textContent=this.classList.contains('listen')?'Натисніть комбінацію…':'Ctrl + Space';">
+        <span class="dot"></span><span class="lbl">Ctrl + Space</span>
+        <span style="margin-left:auto;font-size:11px;color:var(--t3)">натисніть, щоб змінити</span></div></div>
+    <!-- V3 presets -->
+    <div class="vc"><div class="vt"><b>Варіант 3</b> · пресети + своя</div>
+      <div class="chips" id="hkchips"></div>
+      <div class="previewk"><span>Поточна:</span><span class="krow" id="hkprev"><span class="keycap">Fn</span></span></div></div>
+  </div>
+</div>
+
+<div class="sec">
+  <h2>Патерни «обрано / увімкнено»</h2>
+  <div class="grid">
+    <div class="vc"><div class="vt"><b>Тумблер</b> · увімк./вимк.</div>
+      <div class="pats">
+        <div class="pat"><span class="pl">Автовизначення мови</span><button class="tg on" onclick="this.classList.toggle('on')"><span class="th"></span></button></div>
+        <div class="pat"><span class="pl">Звук при завершенні</span><button class="tg" onclick="this.classList.toggle('on')"><span class="th"></span></button></div>
+      </div></div>
+    <div class="vc"><div class="vt"><b>Сегмент-контрол</b> · режим</div>
+      <div class="pats">
+        <div class="pat"><span class="pl">Тема</span><div class="seg" data-seg><button class="on">Світла</button><button>Темна</button></div></div>
+        <div class="pat"><span class="pl">Полірування</span><div class="seg" data-seg><button class="on">Вимк.</button><button>Ollama</button><button>Groq</button></div></div>
+      </div></div>
+    <div class="vc"><div class="vt"><b>Чекбокс + чіпси</b></div>
+      <div class="pats">
+        <div class="pat"><span class="pl">Глушити інші звуки</span><div class="cbx on" onclick="this.classList.toggle('on')"></div></div>
+        <div class="pat"><span class="pl">Мова диктовки</span><div class="dchips" id="dchips"></div></div>
+      </div></div>
+  </div>
+</div>
+
+<div class="sec">
+  <h2>Статус-віджети — пристрій / мова / затримка</h2>
+  <div class="grid">
+    <div class="vc"><div class="vt"><b>Варіант 1</b> · чіпси в топбарі</div>
+      <div class="sw-demorow"><span class="brandmini">kuub<i>wave</i></span><span style="margin-left:auto">топбар →</span></div>
+      <div class="swchips">
+        <div class="swchip"><span class="dot"></span><span class="v">RTX 4070</span></div>
+        <div class="swchip"><span class="k">мова</span><span class="v">UK · авто</span></div>
+        <div class="swchip"><span class="k">затримка</span><span class="v c">0.8с</span></div>
+      </div>
+      <div style="font-size:11.5px;color:var(--t3);margin-top:12px">Компактно, завжди на видноті. Двигун — у підказці.</div></div>
+
+    <div class="vc"><div class="vt"><b>Варіант 2</b> · статус-панель під героєм</div>
+      <div class="swbar">
+        <div class="swcell"><div class="k">Двигун</div><div class="v c">Large v3 Turbo UA</div></div>
+        <div class="swcell"><div class="k">Пристрій</div><div class="v">RTX 4070 · CUDA</div></div>
+        <div class="swcell"><div class="k">Мова</div><div class="v">UK · авто</div></div>
+        <div class="swcell"><div class="k">Затримка</div><div class="v a">0.8с</div></div>
+      </div>
+      <div style="font-size:11.5px;color:var(--t3);margin-top:12px">Усе видно одразу. Добре лягає під герой на Головній.</div></div>
+
+    <div class="vc"><div class="vt"><b>Варіант 3</b> · стек у сайдбарі</div>
+      <div class="swside">
+        <div class="r"><div class="ic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg></div><div class="tx"><div class="k">Пристрій</div><div class="v">RTX 4070 · CUDA</div></div></div>
+        <div class="r"><div class="ic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18a15 15 0 0 1 0-18"/></svg></div><div class="tx"><div class="k">Мова</div><div class="v">UK · авто</div></div></div>
+        <div class="r"><div class="ic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></div><div class="tx"><div class="k">Затримка</div><div class="v">0.8с</div></div></div>
+      </div>
+      <div style="font-size:11.5px;color:var(--t3);margin-top:12px">Не займає головну область. Розширення нинішнього чипа «Локально».</div></div>
+
+    <div class="vc"><div class="vt"><b>Варіант 4</b> · метадані на героєві</div>
+      <div class="swhero"><div class="lead">Готові диктувати?</div>
+        <div class="row">
+          <div class="hc"><span class="k">Пристрій</span><span class="v">RTX 4070</span></div>
+          <div class="hc"><span class="k">Мова</span><span class="v">UK · авто</span></div>
+          <div class="hc"><span class="k">Затримка</span><span class="v">0.8с</span></div>
+        </div></div>
+      <div style="font-size:11.5px;color:var(--t3);margin-top:12px">Контекст прямо в кораловому героєві, без окремої панелі.</div></div>
+  </div>
+</div>
+
+<script>
+const MODELS=[
+  {id:"stock",nm:"Large v3 Turbo",meta:"швидка, за замовчуванням",sz:"1.5 GB",installed:true},
+  {id:"ukft",nm:"Large v3 Turbo UA",meta:"донавчена на українській",sz:"1.5 GB",installed:true},
+  {id:"large",nm:"Large v3",meta:"найточніша, найповільніша",sz:"2.9 GB",installed:false},
+  {id:"small",nm:"Small",meta:"легка, слабший GPU",sz:"465 MB",installed:false},
+];
+let selModel="ukft";
+function drawM1(){document.getElementById('m1').innerHTML=MODELS.map(m=>`
+  <div class="mrow ${m.id===selModel?'sel':''}" onclick="selModel='${m.id}';drawM1();drawM2()">
+    <div class="radio"></div><div class="info"><div class="nm">${m.nm}</div><div class="meta">${m.meta}</div></div>
+    <div class="sz">${m.sz}</div></div>`).join("");}
+function drawM2(){document.getElementById('m2').innerHTML=MODELS.map(m=>`
+  <div class="mcard ${m.id===selModel?'sel':''}" onclick="selModel='${m.id}';drawM1();drawM2()">
+    <div class="chk"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg></div>
+    <div class="nm">${m.nm}</div><div class="meta">${m.sz} · ${m.meta}</div>
+    ${m.installed?'':'<div class="dl">↓ Завантажити</div>'}</div>`).join("");}
+document.getElementById('m3').innerHTML=MODELS.filter(m=>m.id!=='ukft').map(m=>`
+  <div class="opt"><span>${m.nm} · ${m.sz}</span><span class="use">Обрати</span></div>`).join("");
+drawM1();drawM2();
+
+const HK=["Fn","Ctrl + Space","Alt + D","Своя…"];
+let selHk="Fn";
+function drawHk(){document.getElementById('hkchips').innerHTML=HK.map(k=>`<button class="chip ${k===selHk?'sel':''}" onclick="selHk='${k}';drawHk()">${k}</button>`).join("");
+  const prev=document.getElementById('hkprev');const keys=selHk==='Своя…'?['?']:selHk.split(' + ');
+  prev.innerHTML=keys.map((k,i)=>`${i?'<span class="kplus">+</span>':''}<span class="keycap">${k}</span>`).join("");}
+drawHk();
+
+document.querySelectorAll('[data-seg]').forEach(s=>s.querySelectorAll('button').forEach(b=>b.onclick=()=>{
+  s.querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));}));
+const LANGS=["UK","EN","Авто"];let selLang="Авто";
+function drawDchips(){document.getElementById('dchips').innerHTML=LANGS.map(l=>`<button class="chip ${l===selLang?'sel':''}" onclick="selLang='${l}';drawDchips()">${l}</button>`).join("");}
+drawDchips();
+</script>
+</body>
+</html>

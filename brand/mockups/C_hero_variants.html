@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="uk" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KuubWave — варіанти героя</title>
+<style>
+:root{
+  --bg:#FBF7F5; --card:#FFFFFF; --ink:#1B1720; --t2:#6B6470; --t3:#9A93A0;
+  --line:rgba(27,23,32,.09); --coral:#FF6B5E; --coral-d:#EE5348; --violet:#6D5AE6;
+  --sh-sm:0 1px 2px rgba(27,23,32,.06),0 4px 12px rgba(27,23,32,.05);
+  --sh-hero:0 2px 6px rgba(238,83,72,.16),0 24px 54px rgba(238,83,72,.30);
+}
+:root[data-theme="dark"]{--bg:#171319;--card:#221C29;--ink:#F4EEF2;--t2:#B0A6B4;--t3:#786E7E;--line:rgba(255,255,255,.09);--sh-sm:0 1px 2px rgba(0,0,0,.4),0 5px 14px rgba(0,0,0,.35)}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'IBM Plex Sans',system-ui,'Segoe UI',sans-serif;background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased;padding:32px 40px 80px;transition:background .3s}
+h1{font-size:23px;font-weight:700;letter-spacing:-.03em;margin-bottom:4px}
+.lede{font-size:13px;color:var(--t3);margin-bottom:26px}
+.themebtn{position:fixed;top:26px;right:34px;width:40px;height:40px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--t2);cursor:pointer;box-shadow:var(--sh-sm);font-size:16px}
+.vt{font-size:12px;font-weight:600;color:var(--t3);margin:26px 0 12px;display:flex;align-items:center;gap:8px}
+.vt b{color:var(--ink);font-size:14px}
+.vt .note{color:var(--t3);font-weight:400;margin-left:6px}
+
+/* shared hero shell + content */
+.hero{position:relative;border-radius:26px;padding:38px 40px 32px;color:#fff;overflow:hidden;min-height:230px;
+  display:flex;flex-direction:column;justify-content:center;box-shadow:var(--sh-hero)}
+.hero-in{position:relative;z-index:2;display:flex;align-items:center;gap:34px}
+.recbtn{width:104px;height:104px;border-radius:50%;background:#fff;flex-shrink:0;display:flex;align-items:center;justify-content:center;box-shadow:0 12px 30px rgba(0,0,0,.20);color:var(--coral)}
+.htx .k{display:inline-flex;align-items:center;gap:10px;font-size:21px;font-weight:600}
+.key{font-family:'JetBrains Mono',monospace;font-size:14px;background:rgba(255,255,255,.22);border-radius:9px;padding:5px 12px;font-weight:500}
+.htx .s{margin-top:10px;font-size:13.5px;color:rgba(255,255,255,.9);line-height:1.5;max-width:430px}
+.wl-row{display:flex;align-items:center;gap:4px;height:40px;margin-top:18px}
+.wl{width:5px;border-radius:4px;background:rgba(255,255,255,.7);transform-origin:center;animation:w 1.3s ease-in-out infinite}
+@keyframes w{0%,100%{transform:scaleY(.22)}50%{transform:scaleY(1)}}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:18px;position:relative;z-index:2}
+.hc{display:flex;flex-direction:column;gap:2px;background:rgba(255,255,255,.16);border-radius:10px;padding:7px 11px}
+.hc .k{font-size:9.5px;text-transform:uppercase;letter-spacing:.06em;color:rgba(255,255,255,.78)}
+.hc .v{font-size:12.5px;font-weight:600}
+
+/* V1 — mesh gradient + aurora + grain */
+.h1bg{background:radial-gradient(120% 150% at 12% 0%,#FF8A6B 0%,var(--coral) 42%,var(--coral-d) 100%)}
+.h1bg .blob{position:absolute;border-radius:50%;pointer-events:none;filter:blur(10px);z-index:1}
+.h1bg .b1{width:340px;height:340px;top:-150px;right:-40px;background:rgba(255,200,150,.35);animation:float1 9s ease-in-out infinite}
+.h1bg .b2{width:240px;height:240px;bottom:-150px;left:22%;background:rgba(109,90,230,.30);animation:float2 11s ease-in-out infinite}
+.h1bg .b3{width:200px;height:200px;top:20%;left:44%;background:rgba(255,120,90,.35);animation:float1 13s ease-in-out infinite}
+.h1bg::after{content:"";position:absolute;inset:0;z-index:1;opacity:.5;mix-blend-mode:overlay;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2'/%3E%3C/filter%3E%3Crect width='120' height='120' filter='url(%23n)' opacity='0.5'/%3E%3C/svg%3E")}
+@keyframes float1{0%,100%{transform:translate(0,0)}50%{transform:translate(-24px,20px)}}
+@keyframes float2{0%,100%{transform:translate(0,0)}50%{transform:translate(26px,-18px)}}
+
+/* V2 — generated image bg */
+.h2bg{background:#EE5348}
+.h2bg .img{position:absolute;inset:0;z-index:0;background:url('hero-art.png') center/cover no-repeat}
+.h2bg .veil{position:absolute;inset:0;z-index:1;background:linear-gradient(90deg,rgba(214,56,45,.72) 0%,rgba(214,56,45,.28) 42%,rgba(214,56,45,0) 75%)}
+
+/* V3 — live canvas field */
+.h3bg{background:radial-gradient(120% 150% at 12% 0%,#FF8A6B 0%,var(--coral) 42%,var(--coral-d) 100%)}
+.h3bg canvas{position:absolute;inset:0;z-index:1;width:100%;height:100%}
+/* V4 — particle equalizer */
+.h4bg{background:radial-gradient(120% 150% at 12% 0%,#FF8A6B 0%,var(--coral) 42%,var(--coral-d) 100%)}
+.h4bg canvas{position:absolute;inset:0;z-index:1;width:100%;height:100%}
+/* V5 — 3D silk image */
+.h5bg{background:#241419}
+.h5bg .img{position:absolute;inset:0;z-index:0;background:url('hero-art2.png') center/cover no-repeat}
+.h5bg .veil{position:absolute;inset:0;z-index:1;background:linear-gradient(90deg,rgba(24,14,18,.68) 0%,rgba(24,14,18,.18) 46%,transparent 72%)}
+/* V6 — animated mesh gradient */
+.h6bg{background:#EE5348;background-image:radial-gradient(42% 62% at 15% 20%,#FF9A7B,transparent 60%),radial-gradient(46% 66% at 82% 28%,#FF5E6E,transparent 60%),radial-gradient(52% 72% at 62% 92%,#7A5CE6,transparent 55%),radial-gradient(46% 60% at 28% 82%,#FF6B5E,transparent 60%);background-size:200% 200%;animation:mesh 16s ease-in-out infinite}
+@keyframes mesh{0%,100%{background-position:0% 0%,100% 0%,50% 100%,0% 100%}50%{background-position:30% 22%,68% 42%,42% 68%,20% 58%}}
+</style>
+</head>
+<body>
+<button class="themebtn" onclick="var r=document.documentElement;r.setAttribute('data-theme',r.getAttribute('data-theme')==='dark'?'light':'dark')">◐</button>
+<h1>KuubWave — варіанти героя</h1>
+<div class="lede">Той самий контент, три обробки фону. Апка офлайн: 1 і 3 — чистий код, 2 — вшита картинка.</div>
+
+<div class="vt"><b>Варіант 1</b> · mesh-градієнт + аврора + зерно <span class="note">(CSS, живі світлові плями)</span></div>
+<div class="hero h1bg" id="hA">
+  <div class="blob b1"></div><div class="blob b2"></div><div class="blob b3"></div>
+  <div class="hero-in"><div class="recbtn" id="mic"></div>
+    <div class="htx"><div class="k">Затисніть <span class="key">Fn</span> і говоріть</div>
+      <div class="s">Диктуйте будь-де на екрані. Розпізнавання йде на вашому GPU — жодне слово не залишає цей компʼютер.</div>
+      <div class="wl-row" data-wl></div></div></div>
+  <div class="chips"><div class="hc"><span class="k">Пристрій</span><span class="v">RTX 4070</span></div><div class="hc"><span class="k">Мова</span><span class="v">UK · авто</span></div><div class="hc"><span class="k">Затримка</span><span class="v">0.8с</span></div></div>
+</div>
+
+<div class="vt"><b>Варіант 2</b> · генерована коралова абстракція <span class="note">(вшита картинка + вуаль для читабельності)</span></div>
+<div class="hero h2bg">
+  <div class="img"></div><div class="veil"></div>
+  <div class="hero-in"><div class="recbtn"></div>
+    <div class="htx"><div class="k">Затисніть <span class="key">Fn</span> і говоріть</div>
+      <div class="s">Диктуйте будь-де на екрані. Розпізнавання йде на вашому GPU — жодне слово не залишає цей компʼютер.</div>
+      <div class="wl-row" data-wl></div></div></div>
+  <div class="chips"><div class="hc"><span class="k">Пристрій</span><span class="v">RTX 4070</span></div><div class="hc"><span class="k">Мова</span><span class="v">UK · авто</span></div><div class="hc"><span class="k">Затримка</span><span class="v">0.8с</span></div></div>
+</div>
+
+<div class="vt"><b>Варіант 3</b> · живе canvas-поле хвилі <span class="note">(код, реагує/дихає — по назві KuubWave)</span></div>
+<div class="hero h3bg">
+  <canvas id="cv"></canvas>
+  <div class="hero-in"><div class="recbtn"></div>
+    <div class="htx"><div class="k">Затисніть <span class="key">Fn</span> і говоріть</div>
+      <div class="s">Диктуйте будь-де на екрані. Розпізнавання йде на вашому GPU — жодне слово не залишає цей компʼютер.</div>
+      <div class="wl-row" data-wl></div></div></div>
+  <div class="chips"><div class="hc"><span class="k">Пристрій</span><span class="v">RTX 4070</span></div><div class="hc"><span class="k">Мова</span><span class="v">UK · авто</span></div><div class="hc"><span class="k">Затримка</span><span class="v">0.8с</span></div></div>
+</div>
+
+<div class="vt"><b>Варіант 4</b> · частинкове поле-екалайзер <span class="note">(canvas, стовпчики-крапки дихають)</span></div>
+<div class="hero h4bg">
+  <canvas id="cv4"></canvas>
+  <div class="hero-in"><div class="recbtn"></div>
+    <div class="htx"><div class="k">Затисніть <span class="key">Fn</span> і говоріть</div>
+      <div class="s">Диктуйте будь-де на екрані. Розпізнавання йде на вашому GPU — жодне слово не залишає цей компʼютер.</div>
+      <div class="wl-row" data-wl></div></div></div>
+  <div class="chips"><div class="hc"><span class="k">Пристрій</span><span class="v">RTX 4070</span></div><div class="hc"><span class="k">Мова</span><span class="v">UK · авто</span></div><div class="hc"><span class="k">Затримка</span><span class="v">0.8с</span></div></div>
+</div>
+
+<div class="vt"><b>Варіант 5</b> · 3D-шовкова хвиля <span class="note">(генерована картинка, глибина/обʼєм)</span></div>
+<div class="hero h5bg">
+  <div class="img"></div><div class="veil"></div>
+  <div class="hero-in"><div class="recbtn"></div>
+    <div class="htx"><div class="k">Затисніть <span class="key">Fn</span> і говоріть</div>
+      <div class="s">Диктуйте будь-де на екрані. Розпізнавання йде на вашому GPU — жодне слово не залишає цей компʼютер.</div>
+      <div class="wl-row" data-wl></div></div></div>
+  <div class="chips"><div class="hc"><span class="k">Пристрій</span><span class="v">RTX 4070</span></div><div class="hc"><span class="k">Мова</span><span class="v">UK · авто</span></div><div class="hc"><span class="k">Затримка</span><span class="v">0.8с</span></div></div>
+</div>
+
+<div class="vt"><b>Варіант 6</b> · анімований mesh-градієнт <span class="note">(CSS, кольори повільно перетікають)</span></div>
+<div class="hero h6bg">
+  <div class="hero-in"><div class="recbtn"></div>
+    <div class="htx"><div class="k">Затисніть <span class="key">Fn</span> і говоріть</div>
+      <div class="s">Диктуйте будь-де на екрані. Розпізнавання йде на вашому GPU — жодне слово не залишає цей компʼютер.</div>
+      <div class="wl-row" data-wl></div></div></div>
+  <div class="chips"><div class="hc"><span class="k">Пристрій</span><span class="v">RTX 4070</span></div><div class="hc"><span class="k">Мова</span><span class="v">UK · авто</span></div><div class="hc"><span class="k">Затримка</span><span class="v">0.8с</span></div></div>
+</div>
+
+<script>
+const MIC='<svg width="42" height="42" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/><line x1="12" y1="18" x2="12" y2="22"/></svg>';
+document.querySelectorAll('.recbtn').forEach(b=>b.innerHTML=MIC);
+document.querySelectorAll('[data-wl]').forEach(row=>{for(let i=0;i<46;i++){const b=document.createElement('div');b.className='wl';b.style.height=(22+Math.random()*78)+'%';b.style.animationDelay=(-i*0.05)+'s';b.style.animationDuration=(1+Math.random()*0.8)+'s';row.appendChild(b);}});
+
+// V3 live wave field
+const cv=document.getElementById('cv');const ctx=cv.getContext('2d');let W,H,dpr;
+function size(){dpr=Math.min(2,devicePixelRatio||1);const r=cv.getBoundingClientRect();W=cv.width=r.width*dpr;H=cv.height=r.height*dpr;}
+size();addEventListener('resize',size);
+function wave(t,amp,speed,yoff,alpha,lw){ctx.beginPath();for(let x=0;x<=W;x+=6*dpr){
+  const y=H*yoff+Math.sin(x*0.004+t*speed)*amp*dpr+Math.sin(x*0.011+t*speed*1.6)*amp*0.4*dpr;
+  x===0?ctx.moveTo(x,y):ctx.lineTo(x,y);}
+  ctx.strokeStyle=`rgba(255,255,255,${alpha})`;ctx.lineWidth=lw*dpr;ctx.stroke();}
+function loop(now){const t=now*0.001;ctx.clearRect(0,0,W,H);
+  wave(t,26,0.9,0.5,0.16,2);wave(t,34,-0.7,0.6,0.22,2.5);wave(t,20,1.2,0.42,0.12,1.6);
+  requestAnimationFrame(loop);}
+requestAnimationFrame(loop);
+
+// V4 particle equalizer field
+const c4=document.getElementById('cv4');const x4=c4.getContext('2d');let W4,H4,dp4,cols;
+function size4(){dp4=Math.min(2,devicePixelRatio||1);const r=c4.getBoundingClientRect();W4=c4.width=r.width*dp4;H4=c4.height=r.height*dp4;
+  cols=Math.floor(r.width/26);}
+size4();addEventListener('resize',size4);
+function loop4(now){const t=now*0.0015;x4.clearRect(0,0,W4,H4);
+  const gap=W4/cols, dotR=2.2*dp4, rows=7, rgap=16*dp4, baseY=H4*0.62;
+  for(let i=0;i<cols;i++){const cx=i*gap+gap/2;
+    const amp=(Math.sin(i*0.5+t*2)*0.5+0.5)*(Math.sin(i*0.17+t)*0.5+0.5);
+    const n=1+Math.round(amp*(rows-1));
+    for(let j=0;j<n;j++){const cy=baseY-j*rgap;const a=0.10+0.5*(1-j/rows)*amp;
+      x4.beginPath();x4.arc(cx,cy,dotR,0,7);x4.fillStyle=`rgba(255,255,255,${a})`;x4.fill();}}
+  requestAnimationFrame(loop4);}
+requestAnimationFrame(loop4);
+</script>
+</body>
+</html>

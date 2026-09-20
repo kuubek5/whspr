@@ -27,6 +27,11 @@ DefaultDirName={autopf}\{#AppName}
 DefaultGroupName={#AppName}
 DisableProgramGroupPage=yes
 UninstallDisplayIcon={app}\{#AppExe}
+; installer branding: the setup.exe icon and the modern-wizard artwork, all
+; generated from the KuubWave logo by brand\build_icons.py
+SetupIconFile=..\kuubwave.ico
+WizardImageFile=..\brand\kuubwave_wizard_large.bmp
+WizardSmallImageFile=..\brand\kuubwave_wizard_small.bmp
 OutputDir=Output
 ; Versioned filename. A fixed "kuubwave-setup.exe" silently overwrote the previous
 ; build, so two installers with different contents could both claim 1.1.0 with

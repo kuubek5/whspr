@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="uk" data-theme="light">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KuubWave — варіанти історії</title>
+<style>
+:root{--bg:#FBF7F5;--card:#FFFFFF;--ink:#1B1720;--t2:#6B6470;--t3:#9A93A0;
+  --line:rgba(27,23,32,.09);--line2:rgba(27,23,32,.15);--field:#FFFFFF;--field2:#F6F1EE;
+  --coral:#FF6B5E;--coral-d:#EE5348;--coral-ink:#D8382D;--coral-wash:#FFECE9;
+  --aqua:#0FA598;--aqua-wash:rgba(15,165,152,.12);--violet:#6D5AE6;--violet-wash:rgba(109,90,230,.12);
+  --sh:0 1px 2px rgba(27,23,32,.05),0 10px 26px rgba(27,23,32,.07);
+  --sh-sm:0 1px 2px rgba(27,23,32,.06),0 4px 12px rgba(27,23,32,.05);--r:16px}
+:root[data-theme="dark"]{--bg:#171319;--card:#221C29;--ink:#F4EEF2;--t2:#B0A6B4;--t3:#786E7E;--line:rgba(255,255,255,.09);--line2:rgba(255,255,255,.16);--field:#2A2331;--field2:#221C29;--coral-ink:#FF9488;--coral-wash:rgba(255,122,110,.16);--aqua:#33CBBB;--aqua-wash:rgba(51,203,187,.15);--violet:#9784F5;--violet-wash:rgba(151,132,245,.16);--sh-sm:0 1px 2px rgba(0,0,0,.4),0 5px 14px rgba(0,0,0,.35);--sh:0 1px 2px rgba(0,0,0,.4),0 14px 34px rgba(0,0,0,.42)}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'IBM Plex Sans',system-ui,'Segoe UI',sans-serif;background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased;padding:32px 40px 70px}
+.mono{font-family:'JetBrains Mono','Cascadia Code',Consolas,monospace;font-variant-numeric:tabular-nums}
+h1{font-size:22px;font-weight:700;letter-spacing:-.03em;margin-bottom:4px}
+.lede{font-size:13px;color:var(--t3);margin-bottom:22px}
+.themebtn{position:fixed;top:26px;right:34px;width:40px;height:40px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--t2);cursor:pointer;box-shadow:var(--sh-sm);font-size:16px}
+.vt{font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--coral-ink);margin:34px 0 14px}
+.frame{background:var(--card);border-radius:20px;padding:20px 22px;box-shadow:var(--sh-sm)}
+
+svg{stroke-linecap:round;stroke-linejoin:round}
+.ic{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.9}
+
+/* toolbar */
+.toolbar{display:flex;align-items:center;gap:12px;margin-bottom:8px;flex-wrap:wrap}
+.search{flex:1;min-width:200px;display:flex;align-items:center;gap:9px;background:var(--field2);border:1px solid var(--line);border-radius:12px;padding:10px 13px}
+.search input{border:none;background:none;outline:none;font-family:inherit;font-size:13px;color:var(--ink);width:100%}
+.search .ic{color:var(--t3);flex-shrink:0}
+.chips{display:flex;gap:6px}
+.chip{font-family:inherit;font-size:12px;font-weight:600;padding:8px 12px;border-radius:10px;border:1px solid var(--line);background:var(--field);color:var(--t2);cursor:pointer;transition:.14s}
+.chip:hover{color:var(--ink)}.chip.on{background:var(--coral);color:#fff;border-color:var(--coral)}
+.statline{display:flex;gap:10px;margin:14px 0 6px}
+.statchip{display:flex;flex-direction:column;gap:1px;background:var(--field2);border-radius:12px;padding:10px 14px}
+.statchip .n{font-size:17px;font-weight:700}.statchip .n.c{color:var(--coral-ink)}.statchip .n.a{color:var(--aqua)}
+.statchip .l{font-size:10.5px;color:var(--t3)}
+
+/* day group */
+.dayhead{font-size:11.5px;font-weight:600;color:var(--t3);margin:18px 0 8px;display:flex;align-items:center;gap:8px}
+.dayhead::after{content:"";flex:1;height:1px;background:var(--line)}
+.hcard{display:flex;align-items:flex-start;gap:14px;padding:14px 16px;border-radius:14px;transition:.14s;position:relative}
+.hcard:hover{background:var(--field2)}
+.hcard .av{width:36px;height:36px;border-radius:11px;background:var(--coral-wash);color:var(--coral-ink);display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:1px}
+.hcard.en .av{background:var(--violet-wash);color:var(--violet)}
+.hcard .bd{flex:1;min-width:0}
+.hcard .tx{font-size:13.5px;line-height:1.5}
+.hcard .meta{display:flex;align-items:center;gap:10px;margin-top:6px;font-size:11.5px;color:var(--t3)}
+.tag{font-size:10px;font-weight:700;color:var(--aqua);background:var(--aqua-wash);border-radius:6px;padding:2px 7px}
+.tag.v{color:var(--violet);background:var(--violet-wash)}
+.acts{display:flex;gap:6px;opacity:0;transition:.14s;flex-shrink:0}
+.hcard:hover .acts{opacity:1}
+.mini{width:30px;height:30px;border-radius:9px;border:1px solid var(--line);background:var(--card);color:var(--t2);display:flex;align-items:center;justify-content:center;cursor:pointer;transition:.14s}
+.mini:hover{color:var(--ink);border-color:var(--line2)}
+
+/* V2 two-pane */
+.two{display:grid;grid-template-columns:300px 1fr;gap:0;min-height:360px}
+.two .list{border-right:1px solid var(--line);padding-right:14px;overflow:auto}
+.lrow{padding:12px 12px;border-radius:12px;cursor:pointer;transition:.14s}
+.lrow:hover{background:var(--field2)}
+.lrow.on{background:var(--coral-wash)}
+.lrow .t{font-size:13px;line-height:1.4;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.lrow.on .t{color:var(--coral-ink);font-weight:500}
+.lrow .m{font-size:11px;color:var(--t3);margin-top:5px;display:flex;gap:8px;align-items:center}
+.detail{padding:6px 8px 6px 26px;display:flex;flex-direction:column}
+.detail .dmeta{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--t3);margin-bottom:14px}
+.detail .dtx{font-size:19px;line-height:1.6;font-weight:500;flex:1}
+.detail .dacts{display:flex;gap:10px;margin-top:20px;flex-wrap:wrap}
+.btn{font-family:inherit;border:none;border-radius:11px;padding:9px 15px;font-size:12.5px;font-weight:600;cursor:pointer;transition:.15s;display:flex;align-items:center;gap:7px}
+.btn.pri{background:var(--coral);color:#fff}.btn.pri:hover{background:var(--coral-d)}
+.btn.ghost{background:var(--field);color:var(--ink);border:1px solid var(--line)}.btn.ghost:hover{border-color:var(--line2)}
+
+/* V3 timeline */
+.tl{position:relative;padding-left:20px}
+.tl::before{content:"";position:absolute;left:4px;top:6px;bottom:6px;width:2px;background:var(--line)}
+.tlday{position:relative;margin:6px 0 4px;font-size:11.5px;font-weight:700;color:var(--coral-ink)}
+.tlday::before{content:"";position:absolute;left:-20px;top:3px;width:10px;height:10px;border-radius:50%;background:var(--coral);box-shadow:0 0 0 3px var(--coral-wash)}
+.tlitem{position:relative;padding:10px 0 10px 4px}
+.tlitem::before{content:"";position:absolute;left:-17px;top:16px;width:6px;height:6px;border-radius:50%;background:var(--line2)}
+.tlitem .tt{font-size:13px;line-height:1.45}
+.tlitem .mm{font-size:11px;color:var(--t3);margin-top:3px;display:flex;gap:9px;align-items:center}
+</style></head>
+<body>
+<button class="themebtn" onclick="var r=document.documentElement;r.setAttribute('data-theme',r.getAttribute('data-theme')==='dark'?'light':'dark')">◐</button>
+<h1>Історія — варіанти</h1>
+<div class="lede">Той самий набір диктовок, три способи подачі. Клікай фільтри / рядки.</div>
+
+<div class="vt">Варіант 1 · панель + групування по днях</div>
+<div class="frame">
+  <div class="toolbar">
+    <div class="search"><svg class="ic" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg><input placeholder="Пошук у диктовках…"></div>
+    <div class="chips" id="f1"><button class="chip on">Усі</button><button class="chip">UK</button><button class="chip">EN</button></div>
+    <button class="chip"><svg class="ic" viewBox="0 0 24 24" style="width:13px;height:13px"><path d="M3 6h18M6 12h12M10 18h4"/></svg> Новіші</button>
+  </div>
+  <div class="statline">
+    <div class="statchip"><span class="n c mono">6</span><span class="l">усього</span></div>
+    <div class="statchip"><span class="n mono">3</span><span class="l">сьогодні</span></div>
+    <div class="statchip"><span class="n a mono">46</span><span class="l">слів</span></div>
+  </div>
+  <div id="list1"></div>
+</div>
+
+<div class="vt">Варіант 2 · список + деталі (дві панелі)</div>
+<div class="frame">
+  <div class="two">
+    <div class="list" id="list2"></div>
+    <div class="detail" id="detail2"></div>
+  </div>
+</div>
+
+<div class="vt">Варіант 3 · таймлайн</div>
+<div class="frame">
+  <div class="tl" id="tl"></div>
+</div>
+
+<script>
+const D=[
+  {day:"Сьогодні",time:"14:32",lang:"UK",dur:"3.2с",words:8,t:"зателефонувати Оксані до пʼятниці щодо звіту"},
+  {day:"Сьогодні",time:"13:10",lang:"UK",dur:"2.1с",words:6,t:"додати пункт про бекапи в документацію"},
+  {day:"Сьогодні",time:"11:48",lang:"UK",dur:"1.9с",words:5,t:"потрібно оновити прошивку квадрокоптера"},
+  {day:"Вчора",time:"19:20",lang:"UK",dur:"2.4с",words:6,t:"нагадати купити фотополімер для друку"},
+  {day:"Вчора",time:"16:05",lang:"EN",dur:"3.0с",words:9,t:"schedule the standup for tomorrow morning"},
+  {day:"12 вересня",time:"10:12",lang:"UK",dur:"4.1с",words:12,t:"написати чернетку листа для клієнта про терміни"},
+];
+const IC={copy:'<rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+  ins:'<path d="M12 5v14M5 12h14"/>',del:'<path d="M3 6h18M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
+  quote:'<path d="M12 2a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v1a7 7 0 0 1-14 0v-1"/>'};
+const sic=(p,w=14)=>`<svg class="ic" viewBox="0 0 24 24" style="width:${w}px;height:${w}px">${p}</svg>`;
+const tag=l=>`<span class="tag ${l==='EN'?'v':''}">${l}</span>`;
+
+// V1 grouped
+function drawV1(){
+  let html="",cur="";
+  D.forEach(d=>{if(d.day!==cur){cur=d.day;html+=`<div class="dayhead">${d.day}</div>`;}
+    html+=`<div class="hcard ${d.lang==='EN'?'en':''}">
+      <div class="av">${sic(IC.quote,16)}</div>
+      <div class="bd"><div class="tx">${d.t}</div>
+        <div class="meta"><span class="mono">${d.time}</span>${tag(d.lang)}<span>${d.dur}</span><span>·</span><span>${d.words} слів</span></div></div>
+      <div class="acts"><button class="mini">${sic(IC.copy)}</button><button class="mini">${sic(IC.ins)}</button><button class="mini">${sic(IC.del)}</button></div>
+    </div>`;});
+  document.getElementById('list1').innerHTML=html;
+}
+document.querySelectorAll('#f1 .chip').forEach(b=>b.onclick=()=>document.querySelectorAll('#f1 .chip').forEach(x=>x.classList.toggle('on',x===b)));
+
+// V2 two-pane
+let sel2=0;
+function drawV2(){
+  document.getElementById('list2').innerHTML=D.map((d,i)=>`
+    <div class="lrow ${i===sel2?'on':''}" data-i="${i}"><div class="t">${d.t}</div>
+      <div class="m"><span class="mono">${d.day}, ${d.time}</span>${tag(d.lang)}</div></div>`).join("");
+  const d=D[sel2];
+  document.getElementById('detail2').innerHTML=`
+    <div class="dmeta"><span class="mono">${d.day}, ${d.time}</span>${tag(d.lang)}<span>${d.dur}</span><span>·</span><span>${d.words} слів</span></div>
+    <div class="dtx">${d.t}</div>
+    <div class="dacts"><button class="btn pri">${sic(IC.copy)} Копіювати</button><button class="btn ghost">${sic(IC.ins)} Вставити в поле</button><button class="btn ghost">${sic(IC.del)} Видалити</button></div>`;
+  document.querySelectorAll('#list2 .lrow').forEach(r=>r.onclick=()=>{sel2=+r.dataset.i;drawV2();});
+}
+
+// V3 timeline
+function drawV3(){
+  let html="",cur="";
+  D.forEach(d=>{if(d.day!==cur){cur=d.day;html+=`<div class="tlday">${d.day}</div>`;}
+    html+=`<div class="tlitem"><div class="tt">${d.t}</div>
+      <div class="mm"><span class="mono">${d.time}</span>${tag(d.lang)}<span>${d.dur} · ${d.words} слів</span></div></div>`;});
+  document.getElementById('tl').innerHTML=html;
+}
+drawV1();drawV2();drawV3();
+</script>
+</body></html>

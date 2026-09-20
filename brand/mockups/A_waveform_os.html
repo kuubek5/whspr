@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="uk" data-theme="dark">
+<!--
+THESIS: The waveform is the instrument, not a decoration — the whole screen listens. Refuses the sidebar-plus-stat-cards dashboard.
+OWN-WORLD: Near-black graphite (#0B0B0F) flooded with one coral (#FF6B5E); a single large living waveform is the hero surface; type is IBM Plex, numerals tabular; panels are matte, hairline-bordered, no glass.
+STORY: User sees the app is alive and listening, understands hold-to-talk instantly, trusts it runs locally on their GPU.
+FIRST VIEWPORT: Left rail (mark + nav). Center: giant coral waveform arc filling 60% height, hotkey prompt beneath, live stats as a quiet baseline strip. No cards above the fold.
+FORM: "Audio instrument / console" world. Streamlined comp — not the full impeccable roll.
+FINISH: comp for selection only.
+-->
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KuubWave — Waveform OS</title>
+<style>
+:root{
+  --bg:#0B0B0F; --panel:#121218; --panel2:#17171F; --line:rgba(255,255,255,.07);
+  --line2:rgba(255,255,255,.14); --t1:#F4F4F7; --t2:#9A9AA6; --t3:#61616C;
+  --coral:#FF6B5E; --coral-dim:#C24A44;
+  --coral-glow:rgba(255,107,94,.20);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:'IBM Plex Sans',system-ui,'Segoe UI',sans-serif;background:var(--bg);color:var(--t1);
+  display:flex;overflow:hidden;-webkit-font-smoothing:antialiased;user-select:none}
+.mono{font-family:'JetBrains Mono','Cascadia Code',Consolas,monospace;font-variant-numeric:tabular-nums}
+.rail{width:74px;background:var(--panel);border-right:1px solid var(--line);
+  display:flex;flex-direction:column;align-items:center;padding:20px 0;gap:8px;flex-shrink:0}
+.mark{width:40px;height:40px;margin-bottom:22px}
+.navb{width:44px;height:44px;border-radius:13px;display:flex;align-items:center;justify-content:center;
+  color:var(--t3);cursor:pointer;transition:.18s;position:relative}
+.navb:hover{color:var(--t1);background:var(--panel2)}
+.navb.on{color:var(--coral);background:var(--coral-glow)}
+.navb.on::before{content:"";position:absolute;left:-20px;top:12px;bottom:12px;width:3px;border-radius:3px;background:var(--coral)}
+.rail-sp{flex:1}
+.gpu{width:9px;height:9px;border-radius:50%;background:var(--coral);outline:3px solid var(--coral-glow)}
+.main{flex:1;display:flex;flex-direction:column;min-width:0}
+.top{height:60px;display:flex;align-items:center;justify-content:space-between;padding:0 30px;border-bottom:1px solid var(--line)}
+.wordmark{display:flex;align-items:baseline;gap:0;font-weight:700;font-size:19px;letter-spacing:-.02em}
+.wordmark b{color:var(--coral);font-weight:700}
+.pill{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--t2);border:1px solid var(--line);
+  padding:6px 12px;border-radius:99px}
+.stage{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;position:relative;padding:20px}
+.aura{position:absolute;top:50%;left:50%;width:680px;height:680px;transform:translate(-50%,-58%);
+  background:radial-gradient(circle,var(--coral-glow),transparent 62%);pointer-events:none}
+.wave{display:flex;align-items:center;gap:5px;height:210px;z-index:1}
+.bar{width:6px;border-radius:6px;background:linear-gradient(180deg,var(--coral),var(--coral-dim));
+  animation:pulse 1.5s ease-in-out infinite}
+@keyframes pulse{0%,100%{transform:scaleY(.28)}50%{transform:scaleY(1)}}
+.state{margin-top:34px;text-align:center;z-index:1}
+.kbd{display:inline-flex;align-items:center;gap:9px;font-size:15px;color:var(--t1);font-weight:500}
+.key{font-family:'JetBrains Mono',monospace;font-size:13px;background:var(--panel2);border:1px solid var(--line2);
+  border-bottom-width:2px;border-radius:8px;padding:5px 11px;color:var(--coral)}
+.sub{margin-top:10px;font-size:13px;color:var(--t3)}
+.baseline{display:flex;align-items:stretch;border-top:1px solid var(--line);background:var(--panel)}
+.stat{flex:1;padding:16px 26px;border-right:1px solid var(--line)}
+.stat:last-child{border-right:none}
+.stat .n{font-size:23px;font-weight:600;letter-spacing:-.01em}
+.stat .l{font-size:11px;color:var(--t3);margin-top:4px;text-transform:uppercase;letter-spacing:.08em}
+.stat .n b{color:var(--coral);font-weight:600}
+.feed{position:absolute;right:30px;bottom:96px;width:290px;z-index:2}
+.feed h4{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--t3);margin-bottom:10px}
+.frow{font-size:12.5px;color:var(--t2);padding:8px 0;border-bottom:1px solid var(--line);line-height:1.5}
+.frow:last-child{border:none}
+.frow span{color:var(--t3);font-size:11px}
+</style>
+</head>
+<body>
+<nav class="rail">
+  <svg class="mark" viewBox="0 0 100 100" fill="none"><rect width="100" height="100" rx="26" fill="#121218"/><g stroke="#FF6B5E" stroke-width="8" stroke-linecap="round"><path d="M28 30v40"/><path d="M40 44v28"/><path d="M40 44c6 0 6 18 12 18"/><path d="M52 62V34"/><path d="M64 40 76 62M64 62 76 40" stroke-width="8"/></g></svg>
+  <div class="navb on" title="Головна"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10.5 12 3l9 7.5"/><path d="M5 9.5V20a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V9.5"/></svg></div>
+  <div class="navb" title="Історія"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7"/><polyline points="3 4 3 9 8 9"/><polyline points="12 7 12 12 16 14"/></svg></div>
+  <div class="navb" title="Словник"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4.5A2.5 2.5 0 0 1 6.5 2H20v16H6.5A2.5 2.5 0 0 0 4 20.5"/><path d="M4 4.5v16A2.5 2.5 0 0 0 6.5 23H20"/></svg></div>
+  <div class="navb" title="Налаштування"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/></svg></div>
+  <div class="rail-sp"></div>
+  <div class="gpu" title="Локально · RTX 4070"></div>
+</nav>
+<main class="main">
+  <div class="top">
+    <div class="wordmark">kuub<b>wave</b></div>
+    <div class="pill"><span class="gpu" style="width:7px;height:7px"></span>Локально · RTX 4070 · GPU</div>
+  </div>
+  <div class="stage">
+    <div class="aura"></div>
+    <div class="wave" id="wave"></div>
+    <div class="state">
+      <div class="kbd">Затисніть <span class="key">Fn</span> і говоріть</div>
+      <div class="sub">диктування працює будь-де на екрані · розпізнавання на вашому GPU</div>
+    </div>
+    <div class="feed">
+      <h4>Останні диктовки</h4>
+      <div class="frow">зателефонувати Оксані до пʼятниці щодо звіту <span>· 14:32</span></div>
+      <div class="frow">додати пункт про бекапи в документацію <span>· 13:10</span></div>
+      <div class="frow">оновити прошивку квадрокоптера <span>· 11:48</span></div>
+    </div>
+  </div>
+  <div class="baseline">
+    <div class="stat"><div class="n mono">2 481</div><div class="l">Слів сьогодні</div></div>
+    <div class="stat"><div class="n mono">37</div><div class="l">Диктовок</div></div>
+    <div class="stat"><div class="n mono">184 920</div><div class="l">Слів усього</div></div>
+    <div class="stat"><div class="n mono"><b>132</b></div><div class="l">Слів / хв</div></div>
+  </div>
+</main>
+<script>
+const w=document.getElementById('wave');
+const H=[.3,.5,.75,.55,.9,1,.7,.85,.6,.95,.7,.45,.8,1,.75,.55,.9,.65,.4,.6,.85,.7,.5,.75,.95,.6,.8,.45,.7,.9,.55,.75,.5,.85,.65,.4,.6,.8,.5,.35];
+H.forEach((h,i)=>{const b=document.createElement('div');b.className='bar';
+  b.style.height=(h*100)+'%';b.style.animationDelay=(-i*0.05)+'s';
+  b.style.animationDuration=(1.1+Math.random()*0.8)+'s';w.appendChild(b);});
+</script>
+</body>
+</html>

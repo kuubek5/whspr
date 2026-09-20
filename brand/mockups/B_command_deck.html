@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="uk" data-theme="dark">
+<!--
+THESIS: A dictation console for power users — the screen is a control surface with live readouts, not a friendly card grid. Refuses the consumer dashboard.
+OWN-WORLD: True-black (#08090C) deck, coral (#FF6B5E) as the only signal color, hairline grid, IBM Plex Sans for prose and JetBrains Mono for keys/telemetry/data only. Flat, crisp, no glass, no glow.
+STORY: A keyboard-first user reads system state at a glance, sees the last capture stream in, trusts local GPU processing.
+FIRST VIEWPORT: Top telemetry strip. Left: command/hotkey column. Center: large "MONITOR" panel with the live transcript and a compact meter. Right: session log. Everything gridded.
+FORM: "Mission console / audio interface" world. Streamlined comp — not the full impeccable roll.
+FINISH: comp for selection only.
+-->
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KuubWave — Command Deck</title>
+<style>
+:root{
+  --bg:#08090C; --panel:#0E1014; --panel2:#141721; --line:rgba(255,255,255,.09);
+  --line2:rgba(255,255,255,.16); --t1:#EDEEF2; --t2:#8C90A0; --t3:#5A5E6E;
+  --coral:#FF6B5E; --coral-ink:#FF8A80; --coral-soft:rgba(255,107,94,.12);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{font-family:'IBM Plex Sans',system-ui,'Segoe UI',sans-serif;background:var(--bg);color:var(--t1);
+  display:flex;flex-direction:column;overflow:hidden;-webkit-font-smoothing:antialiased;user-select:none}
+.mono{font-family:'JetBrains Mono','Cascadia Code',Consolas,monospace;font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+.tele{height:44px;display:flex;align-items:center;gap:0;border-bottom:1px solid var(--line);background:var(--panel);flex-shrink:0}
+.brandcell{display:flex;align-items:center;gap:10px;padding:0 18px;height:100%;border-right:1px solid var(--line)}
+.brandcell b{font-weight:700;font-size:15px;letter-spacing:-.02em}
+.brandcell b i{color:var(--coral);font-style:normal}
+.tcell{padding:0 16px;font-size:11px;color:var(--t2);height:100%;display:flex;flex-direction:column;justify-content:center;
+  border-right:1px solid var(--line);gap:2px}
+.tcell .k{font-size:9px;letter-spacing:.14em;color:var(--t3);text-transform:uppercase}
+.tcell .v{color:var(--t1)}
+.tcell .v.ok{color:var(--coral)}
+.tsp{flex:1}
+.rec{display:flex;align-items:center;gap:8px;padding:0 18px;font-size:11px;color:var(--t2);letter-spacing:.1em;text-transform:uppercase}
+.dot{width:8px;height:8px;border-radius:2px;background:var(--coral)}
+.body{flex:1;display:grid;grid-template-columns:230px 1fr 300px;min-height:0}
+.col{display:flex;flex-direction:column;min-height:0}
+.col.left{border-right:1px solid var(--line);background:var(--panel)}
+.col.right{border-left:1px solid var(--line);background:var(--panel)}
+.hdr{height:34px;display:flex;align-items:center;padding:0 16px;font-size:9.5px;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--t3);border-bottom:1px solid var(--line)}
+.cmd{padding:13px 16px;border-bottom:1px solid var(--line);cursor:pointer;transition:.14s}
+.cmd:hover{background:var(--panel2)}
+.cmd.on{background:var(--coral-soft);box-shadow:inset 3px 0 0 var(--coral)}
+.cmd .row1{display:flex;align-items:center;justify-content:space-between;gap:8px}
+.cmd .nm{font-size:13px;font-weight:500}
+.cmd.on .nm{color:var(--coral-ink)}
+.cmd .kk{font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--t2);border:1px solid var(--line2);
+  border-radius:5px;padding:2px 7px}
+.cmd .ds{font-size:11px;color:var(--t3);margin-top:5px;line-height:1.4}
+.monitor{flex:1;display:flex;flex-direction:column;min-height:0;position:relative}
+.mgrid{position:absolute;inset:34px 0 0 0;pointer-events:none;
+  background:radial-gradient(ellipse 80% 75% at 50% 42%,transparent 55%,rgba(0,0,0,.35) 100%)}
+.mstage{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:30px;z-index:1}
+.meter{display:flex;align-items:flex-end;gap:4px;height:120px;margin-bottom:30px}
+.mb{width:7px;background:var(--coral);border-radius:1px;animation:m 1.2s ease-in-out infinite}
+@keyframes m{0%,100%{height:14%}50%{height:100%}}
+.tx{max-width:560px;text-align:center}
+.tx .lead{font-size:26px;font-weight:600;letter-spacing:-.02em;line-height:1.25}
+.tx .lead .cursor{display:inline-block;width:11px;height:26px;background:var(--coral);vertical-align:-4px;margin-left:3px;animation:bl 1s step-end infinite}
+@keyframes bl{50%{opacity:0}}
+.tx .hint{margin-top:18px;font-size:12px;color:var(--t3);font-family:'JetBrains Mono',monospace;letter-spacing:.02em}
+.tx .hint b{color:var(--coral);font-weight:400}
+.log{flex:1;overflow:hidden}
+.lrow{padding:12px 16px;border-bottom:1px solid var(--line)}
+.lrow .lt{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--t3);display:flex;gap:8px;margin-bottom:5px}
+.lrow .lt .tag{color:var(--coral)}
+.lrow .lx{font-size:12.5px;color:var(--t2);line-height:1.5}
+.ftr{height:30px;border-top:1px solid var(--line);display:flex;align-items:center;padding:0 16px;
+  font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--t3);gap:18px;background:var(--panel)}
+.ftr .on{color:var(--coral)}
+</style>
+</head>
+<body>
+<div class="tele">
+  <div class="brandcell">
+    <svg width="26" height="26" viewBox="0 0 100 100" fill="none"><rect width="100" height="100" rx="26" fill="#141721"/><g stroke="#FF6B5E" stroke-width="8" stroke-linecap="round"><path d="M28 30v40"/><path d="M40 44v28"/><path d="M40 44c6 0 6 18 12 18"/><path d="M52 62V34"/><path d="M64 40 76 62M64 62 76 40"/></g></svg>
+    <b>kuub<i>wave</i></b>
+  </div>
+  <div class="tcell"><span class="k">Двигун</span><span class="v ok">Large v3 Turbo UA</span></div>
+  <div class="tcell"><span class="k">Пристрій</span><span class="v">RTX 4070 · CUDA</span></div>
+  <div class="tcell"><span class="k">Мова</span><span class="v">UK · авто</span></div>
+  <div class="tcell"><span class="k">Затримка</span><span class="v mono">0.8с</span></div>
+  <div class="tsp"></div>
+  <div class="rec"><span class="dot"></span>Очікування</div>
+</div>
+<div class="body">
+  <div class="col left">
+    <div class="hdr">Керування</div>
+    <div class="cmd on">
+      <div class="row1"><span class="nm">Диктувати</span><span class="kk">Fn</span></div>
+      <div class="ds">Затисніть і говоріть будь-де</div>
+    </div>
+    <div class="cmd">
+      <div class="row1"><span class="nm">Режим без утримання</span><span class="kk">⇧ Fn</span></div>
+      <div class="ds">Тап — старт, пауза — стоп</div>
+    </div>
+    <div class="cmd">
+      <div class="row1"><span class="nm">Полірування AI</span><span class="kk">off</span></div>
+      <div class="ds">Локально · Ollama</div>
+    </div>
+    <div class="cmd">
+      <div class="row1"><span class="nm">Глушити інші звуки</span><span class="kk">on</span></div>
+      <div class="ds">Під час запису</div>
+    </div>
+  </div>
+  <div class="col monitor">
+    <div class="hdr">Монітор</div>
+    <div class="mgrid"></div>
+    <div class="mstage">
+      <div class="meter" id="meter"></div>
+      <div class="tx">
+        <div class="lead">Готовий слухати<span class="cursor"></span></div>
+        <div class="hint">натисніть <b>[ Fn ]</b> — розпізнавання йде на вашому GPU, нічого не залишає пристрій</div>
+      </div>
+    </div>
+  </div>
+  <div class="col right">
+    <div class="hdr">Журнал сесії</div>
+    <div class="log">
+      <div class="lrow"><div class="lt"><span>14:32:07</span><span class="tag">UK · 3.2с</span></div><div class="lx">зателефонувати Оксані до пʼятниці щодо звіту</div></div>
+      <div class="lrow"><div class="lt"><span>13:10:41</span><span class="tag">UK · 2.1с</span></div><div class="lx">додати пункт про бекапи в документацію</div></div>
+      <div class="lrow"><div class="lt"><span>11:48:55</span><span class="tag">UK · 1.9с</span></div><div class="lx">потрібно оновити прошивку квадрокоптера</div></div>
+    </div>
+  </div>
+</div>
+<div class="ftr">
+  <span>СЬОГОДНІ <span class="on">2 481</span> слів</span>
+  <span>ДИКТОВОК <span class="on">37</span></span>
+  <span>ТЕМП <span class="on">132</span> сл/хв</span>
+  <span style="flex:1"></span>
+  <span>● локально</span>
+</div>
+<script>
+const m=document.getElementById('meter');
+for(let i=0;i<22;i++){const b=document.createElement('div');b.className='mb';
+  b.style.animationDelay=(-i*0.06)+'s';b.style.animationDuration=(0.9+Math.random()*0.9)+'s';m.appendChild(b);}
+</script>
+</body>
+</html>

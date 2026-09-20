@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="uk" data-theme="light">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KuubWave — марка на світлій темі</title>
+<style>
+:root{--bg:#FBF7F5;--card:#FFFFFF;--sidebar:#FBF7F5;--ink:#1B1720;--t2:#6B6470;--t3:#9A93A0;
+  --line:rgba(27,23,32,.09);--coral:#FF6B5E;--coral-d:#EE5348;--coral-ink:#D8382D;--coral-wash:#FFECE9;
+  --sh-sm:0 1px 2px rgba(27,23,32,.06),0 4px 12px rgba(27,23,32,.05)}
+:root[data-theme="dark"]{--bg:#171319;--card:#221C29;--sidebar:#171319;--ink:#F4EEF2;--t2:#B0A6B4;--t3:#786E7E;--line:rgba(255,255,255,.09);--coral:#FF7A6E;--coral-ink:#FF9488;--coral-wash:rgba(255,122,110,.16);--sh-sm:0 1px 2px rgba(0,0,0,.4),0 5px 14px rgba(0,0,0,.35)}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'IBM Plex Sans',system-ui,'Segoe UI',sans-serif;background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased;padding:34px 40px 60px}
+h1{font-size:22px;font-weight:700;letter-spacing:-.03em;margin-bottom:4px}
+.lede{font-size:13px;color:var(--t3);margin-bottom:24px}
+.themebtn{position:fixed;top:26px;right:34px;width:40px;height:40px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--t2);cursor:pointer;box-shadow:var(--sh-sm);font-size:16px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:16px}
+.vc{background:var(--card);border-radius:18px;padding:18px;box-shadow:var(--sh-sm)}
+.vt{font-size:12px;font-weight:600;margin-bottom:14px}.vt b{color:var(--coral-ink)}
+/* mimic the real sidebar brand row */
+.sb{background:var(--sidebar);border:1px solid var(--line);border-radius:14px;padding:16px 14px;display:flex;align-items:center;gap:11px}
+.sb b{font-size:18px;font-weight:700;letter-spacing:-.02em}.sb b i{color:var(--coral);font-style:normal}
+.mk{width:36px;height:36px;flex-shrink:0}
+.note{font-size:11px;color:var(--t3);margin-top:12px;line-height:1.4}
+</style></head>
+<body>
+<button class="themebtn" onclick="var r=document.documentElement;r.setAttribute('data-theme',r.getAttribute('data-theme')==='dark'?'light':'dark')">◐</button>
+<h1>Марка в сайдбарі — варіанти</h1>
+<div class="lede">Той самий бренд-рядок, різна обробка марки. Перемкни тему (◐) — дивись і на світлій, і на темній.</div>
+<div class="grid" id="grid"></div>
+<script>
+const K='<g stroke="STROKE" stroke-width="8" stroke-linecap="round" fill="none"><path d="M28 30v40"/><path d="M40 44v28"/><path d="M40 44c6 0 6 18 12 18"/><path d="M52 62V34"/><path d="M64 40 76 62M64 62 76 40"/></g>';
+function mark(kind){
+  // returns an <svg> 100x100 viewBox
+  let inner="";
+  if(kind==='dark')      inner=`<rect width="100" height="100" rx="26" fill="#1B1720"/>`+K.replace('STROKE','#FF6B5E');
+  if(kind==='wash')      inner=`<rect width="100" height="100" rx="26" fill="var(--coral-wash)"/>`+K.replace('STROKE','var(--coral-ink)');
+  if(kind==='coral')     inner=`<rect width="100" height="100" rx="26" fill="var(--coral)"/>`+K.replace('STROKE','#fff');
+  if(kind==='bare')      inner=K.replace('STROKE','var(--coral)');
+  if(kind==='outline')   inner=`<rect x="3" y="3" width="94" height="94" rx="24" fill="none" stroke="var(--line)" stroke-width="3"/>`+K.replace('STROKE','var(--coral)');
+  return `<svg class="mk" viewBox="0 0 100 100">${inner}</svg>`;
+}
+const VARS=[
+  ["dark","Поточний — графітний кахель",""],
+  ["wash","Мʼякий кораловий кахель + коралова марка","Найкраще під світлу тему — тепле, не важке."],
+  ["coral","Кораловий кахель + біла марка","Сміливо, збігається з енергією «запису»."],
+  ["bare","Без кахля — марка коралом напряму","Найлегше, зливається з фоном сайдбара."],
+  ["outline","Тонкий контур + коралова марка","Делікатно, тримає форму кахля без заливки."],
+];
+document.getElementById('grid').innerHTML=VARS.map(([k,t,n])=>`
+  <div class="vc"><div class="vt"><b>${t.split('—')[0]}</b></div>
+    <div class="sb">${mark(k)}<b>kuub<i>wave</i></b></div>
+    <div class="note">${t}${n?'<br>'+n:''}</div></div>`).join("");
+</script>
+</body></html>
