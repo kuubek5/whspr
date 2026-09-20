@@ -1,0 +1,89 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-20T12:40:00Z",
+  "title": "Design System: KuubWave",
+  "extensions": {
+    "colorMeta": {
+      "coral": { "role": "primary", "displayName": "Signal Coral", "canonical": "#FF6B5E" },
+      "aqua": { "role": "secondary", "displayName": "Success Aqua", "canonical": "#33CBBB" },
+      "violet": { "role": "tertiary", "displayName": "Stat Violet", "canonical": "#9784F5" },
+      "amber": { "role": "tertiary", "displayName": "Stat Amber", "canonical": "#F0B429" },
+      "bg": { "role": "neutral", "displayName": "Plum Black", "canonical": "#171319" },
+      "card": { "role": "neutral", "displayName": "Warm Card", "canonical": "#221C29" },
+      "ink": { "role": "neutral", "displayName": "Paper Ink", "canonical": "#F4EEF2" },
+      "muted": { "role": "neutral", "displayName": "Muted Mauve", "canonical": "#B0A6B4" }
+    },
+    "typographyMeta": {
+      "display": { "displayName": "Display", "purpose": "Page titles." },
+      "body": { "displayName": "Body", "purpose": "Descriptions and lists." },
+      "mono": { "displayName": "Mono", "purpose": "Timers, stats, durations (tabular)." }
+    },
+    "shadows": [
+      { "name": "sm", "value": "0 1px 2px rgba(0,0,0,.4),0 5px 14px rgba(0,0,0,.35)", "purpose": "Cards, chips, quiet controls (dark)." },
+      { "name": "standard", "value": "0 1px 2px rgba(0,0,0,.4),0 14px 34px rgba(0,0,0,.42)", "purpose": "Panels and modals (dark)." },
+      { "name": "hero", "value": "0 2px 8px rgba(0,0,0,.4),0 26px 56px rgba(0,0,0,.5)", "purpose": "Only the recording hero card." }
+    ],
+    "motion": [
+      { "name": "theme", "value": "background .3s, color .2s", "purpose": "Theme switch on body." }
+    ],
+    "breakpoints": [
+      { "name": "narrow", "value": "sidebar collapses to icons" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Record action and confirmations.",
+      "html": "<button class=\"ds-btn-primary\">Записати</button>",
+      "css": ".ds-btn-primary{background:#FF6B5E;color:#20141A;padding:11px 18px;border:none;border-radius:12px;font-weight:600;font-family:'IBM Plex Sans',system-ui,sans-serif;transition:transform .16s,background .16s}.ds-btn-primary:hover{background:#F0574C;transform:translateY(-1px)}.ds-btn-primary:focus-visible{outline:2px solid #FF6B5E;outline-offset:2px}"
+    },
+    {
+      "name": "Ghost Button",
+      "kind": "button",
+      "refersTo": "button-ghost",
+      "description": "Secondary actions.",
+      "html": "<button class=\"ds-btn-ghost\">Змінити</button>",
+      "css": ".ds-btn-ghost{background:#221C29;color:#B0A6B4;padding:11px 14px;border:1px solid rgba(255,255,255,.16);border-radius:12px;font-weight:600;font-family:'IBM Plex Sans',system-ui,sans-serif;transition:color .16s,background .16s}.ds-btn-ghost:hover{color:#F4EEF2;background:#2A2331}"
+    },
+    {
+      "name": "Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Content panel / card.",
+      "html": "<div class=\"ds-card\"><b>Панель</b></div>",
+      "css": ".ds-card{background:#221C29;color:#F4EEF2;border-radius:22px;padding:22px 24px;box-shadow:0 1px 2px rgba(0,0,0,.4),0 5px 14px rgba(0,0,0,.35);font-family:'IBM Plex Sans',system-ui,sans-serif}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Soft Studio",
+    "overview": "A calm, premium recording studio in the corner of your screen: warm-dark surfaces, generous rounding, soft shadows, and one live coral energy that only appears where sound and action happen. An Operate surface that stays quiet and scannable and lets the text be the hero. Ships both a warm-dark and a warm-light theme from the same tokens.",
+    "keyCharacteristics": [
+      "Warm-dark-first, with a matching warm-light theme from one token set.",
+      "Coral is the one energy color; aqua means success only.",
+      "Big soft rounding (16-22px) and diffuse shadows.",
+      "IBM Plex Sans throughout, bundled and offline; mono only for numbers.",
+      "Quiet by default - the hero recording card is the one loud surface."
+    ],
+    "rules": [
+      { "name": "The One Energy Rule", "body": "Coral is the only energy color and covers <=10% of a screen.", "section": "colors" },
+      { "name": "The Aqua-Means-Done Rule", "body": "Aqua appears only on success/completion, never as decoration.", "section": "colors" },
+      { "name": "The Tabular-Numbers Rule", "body": "Every changing number renders in tabular mono.", "section": "typography" },
+      { "name": "The Tonal-First Rule", "body": "Prefer tonal layering over borders; shadows stay soft and diffuse.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do keep coral scarce - record button, primary action, live audio, logo.",
+      "Do reserve aqua strictly for success/completion.",
+      "Do render every changing number in tabular mono.",
+      "Do use soft diffuse shadows and tonal layering; rounding 12-22px.",
+      "Do keep both themes in sync from the shared token set."
+    ],
+    "donts": [
+      "Don't introduce a second brand color or use aqua decoratively.",
+      "Don't use hard borders or sharp corners for structure.",
+      "Don't make more than one surface per screen loud (the hero owns that).",
+      "Don't fetch webfonts - IBM Plex is bundled; the app is offline by design."
+    ]
+  }
+}

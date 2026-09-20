@@ -46,5 +46,12 @@
         "reason": "Live-text card sweep is an indeterminate progress indicator, not auto-scrolling content. User confirmed intentional."
       }
     ]
+  },
+  "hook": {
+    "enabled": false,
+    "limits": {
+      "maxFindings": 5,
+      "maxChars": 8000
+    }
   }
 }
