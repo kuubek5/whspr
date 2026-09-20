@@ -49,7 +49,9 @@ Name: "ukrainian"; MessagesFile: "compiler:Languages\Ukrainian.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; Flags: unchecked
+; checked by default so a normal or silent (auto-update) install creates the
+; desktop shortcut; the user can still untick it in the interactive wizard
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"
 Name: "startup"; Description: "Запускати KuubWave при вході в Windows"; Flags: unchecked
 
 [Files]
