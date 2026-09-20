@@ -108,7 +108,7 @@ function mock(method, args) {
     // Preview the first-run wizard in a plain browser by adding ?onboard to the
     // URL; without it the mock reports an already-onboarded user (no wizard).
     onboarded: !/[?&]onboard\b/.test(location.search),
-    theme: "dark", gpu: "RTX 3070", hotkey: "Fn", version: "1.4.5",
+    theme: "dark", gpu: "RTX 3070", hotkey: "Fn", version: "1.4.6",
     license: { licensed: true, daysLeft: 23, exp: "2026-08-04", reason: "ok", customer: "demo@buyer" },
     status: "idle",
     stats: { wordsToday: 2481, dictations: 37, wordsTotal: 184920, wpm: 132 },
@@ -893,7 +893,7 @@ function renderSettings(el) {
   const s = state.settings, tab = state.settingsTab;
   const panes = {
     general: `
-      <div class="panel"><h2>Запуск</h2>
+      <div class="panel"><h2>Запуск і звук</h2>
         ${toggleRow("Запускати з Windows", "Автоматично запускати KuubWave при вході в систему", "autostart")}
         ${toggleRow("Звук при завершенні диктовки", "Короткий сигнал, коли текст готовий", "sound")}</div>
       <div class="panel"><h2>Поведінка</h2>
@@ -1088,7 +1088,6 @@ function licenseGridHtml() {
     ["Дійсна до", l.exp ? `<span class="mono">${esc(l.exp)}</span>` : "—"],
     ["Залишилось", typeof l.daysLeft === "number" ? `<span class="mono">${l.daysLeft}</span> дн.` : "—"],
     ["Покупець", l.customer ? esc(l.customer) : "—"],
-    ["Пристрій", esc(state.gpu)],
   ];
   return `<div class="lic-grid">${rows.map(([k, v]) =>
     `<div class="lr"><span class="lk">${k}</span><span class="lv">${v}</span></div>`).join("")}</div>`;

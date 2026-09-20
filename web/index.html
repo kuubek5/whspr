@@ -260,7 +260,8 @@ body{font-family:'IBM Plex Sans',system-ui,'Segoe UI',sans-serif;background:var(
 
 /* ---- panels / settings primitives ---- */
 .panel{background:var(--card);border-radius:var(--r-lg);padding:22px 24px;box-shadow:var(--sh-sm);margin-bottom:16px}
-.panel h2{font-size:15px;font-weight:600;margin-bottom:3px}
+.panel h2{font-size:15px;font-weight:700;letter-spacing:-.01em;margin-bottom:4px;display:flex;align-items:center;gap:10px;min-height:18px}
+.panel h2::before{content:"";width:3px;align-self:stretch;min-height:16px;border-radius:2px;background:var(--coral);flex-shrink:0}
 .panel .desc{font-size:12.5px;color:var(--t3);line-height:1.5;margin-bottom:16px}
 .srow{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:15px 0;border-top:1px solid var(--line)}
 .srow:first-of-type{border-top:none}
@@ -300,7 +301,7 @@ body{font-family:'IBM Plex Sans',system-ui,'Segoe UI',sans-serif;background:var(
 .mode-card .mc-tx{display:flex;flex-direction:column;min-width:0;gap:2px}
 .mode-card .mc-t{font-size:14.5px;font-weight:700;color:var(--ink)}
 .mode-card .mc-s{font-size:11.5px;color:var(--t2);line-height:1.35}
-.mode-card .mc-check{margin-left:auto;width:22px;height:22px;border-radius:50%;background:var(--coral);color:#fff;display:none;align-items:center;justify-content:center;flex-shrink:0}
+.mode-card .mc-check{margin-left:auto;width:20px;height:20px;border-radius:50%;background:var(--coral);color:#fff;display:none;align-items:center;justify-content:center;flex-shrink:0}
 .mode-card.on .mc-check{display:flex}
 /* condensed cloud configuration card */
 .cloud-card{margin-top:16px;background:var(--field2);border-radius:16px;padding:16px 18px;display:flex;flex-direction:column;gap:12px}
@@ -344,8 +345,8 @@ body{font-family:'IBM Plex Sans',system-ui,'Segoe UI',sans-serif;background:var(
 .level .th{position:absolute;top:-3px;bottom:-3px;left:20%;width:2px;background:var(--t3);opacity:.6}
 /* model cards */
 .mcards{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px;margin-top:4px}
-.mcard{position:relative;border:1.5px solid var(--line);border-radius:15px;padding:14px;cursor:pointer;transition:.14s;background:var(--field);min-width:0}
-.mcard:hover{border-color:var(--line2)}
+.mcard{position:relative;border:1.5px solid var(--line2);border-radius:16px;padding:14px;cursor:pointer;transition:border-color .14s,background .14s;background:var(--field);min-width:0}
+.mcard:hover{border-color:var(--t3)}
 .mcard.on{border-color:var(--coral);background:var(--coral-wash)}
 .mcard .chk{position:absolute;top:10px;right:10px;width:20px;height:20px;border-radius:50%;background:var(--coral);color:#fff;display:none;align-items:center;justify-content:center}
 .mcard.on .chk{display:flex;animation:pop .34s cubic-bezier(.16,1,.3,1)}
@@ -416,8 +417,8 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .fp-flab{font-size:13.5px;font-weight:500}
 .fp-fhint{font-size:12px;color:var(--t3);margin-top:3px;line-height:1.45;max-width:440px}
 .fp-styles{display:grid;grid-template-columns:repeat(auto-fit,minmax(112px,1fr));gap:8px;margin-top:11px}
-.fp-style{position:relative;border:1.5px solid var(--line);border-radius:15px;padding:12px;cursor:pointer;background:var(--field);min-width:0;transition:border-color .14s,background .14s}
-.fp-style:hover{border-color:var(--line2)}
+.fp-style{position:relative;border:1.5px solid var(--line2);border-radius:16px;padding:12px;cursor:pointer;background:var(--field);min-width:0;transition:border-color .14s,background .14s}
+.fp-style:hover{border-color:var(--t3)}
 .fp-style.on{border-color:var(--coral);background:var(--coral-wash)}
 .fp-style:focus-visible{outline:2px solid var(--coral);outline-offset:2px}
 .fp-style .gl{height:30px;display:flex;align-items:center;justify-content:flex-start;margin-bottom:10px;overflow:hidden}
@@ -425,7 +426,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .fp-style .lab{font-size:12.5px;font-weight:600;padding-right:20px}
 .fp-style.on .lab{color:var(--coral-ink)}
 .fp-style .hint{font-size:11px;color:var(--t3);line-height:1.4;margin-top:3px;overflow-wrap:anywhere}
-.fp-style .chk{position:absolute;top:9px;right:9px;width:18px;height:18px;border-radius:50%;background:var(--coral);color:#fff;display:none;align-items:center;justify-content:center}
+.fp-style .chk{position:absolute;top:9px;right:9px;width:20px;height:20px;border-radius:50%;background:var(--coral);color:#fff;display:none;align-items:center;justify-content:center}
 .fp-style.on .chk{display:flex;animation:pop .34s cubic-bezier(.16,1,.3,1)}
 /* all three shapes (pill / orb / dock) are drawn by the real overlay (ui.py);
    the .soon styling is kept only as a safety net for any future not-ready style */
