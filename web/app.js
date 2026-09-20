@@ -25,6 +25,7 @@ const ICON = {
   upd: '<path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/>',
   chip: '<rect x="6" y="6" width="12" height="12" rx="2"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/>',
+  cloud: '<path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/>',
   key: '<circle cx="7.5" cy="15.5" r="4.5"/><path d="M10.7 12.3 21 2M16 7l3 3M13.5 9.5l2.5 2.5"/>',
   eye: '<path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7Z"/><circle cx="12" cy="12" r="3"/>',
   eyeOff: '<path d="M17.9 17.9A10.6 10.6 0 0 1 12 19c-7 0-11-7-11-7a19 19 0 0 1 5-5.9M9.9 4.2A9.7 9.7 0 0 1 12 4c7 0 11 7 11 7a19 19 0 0 1-2.3 3.2M14.1 14.1a3 3 0 1 1-4.2-4.2"/><line x1="2" y1="2" x2="22" y2="22"/>',
@@ -107,7 +108,7 @@ function mock(method, args) {
     // Preview the first-run wizard in a plain browser by adding ?onboard to the
     // URL; without it the mock reports an already-onboarded user (no wizard).
     onboarded: !/[?&]onboard\b/.test(location.search),
-    theme: "dark", gpu: "RTX 3070", hotkey: "Fn", version: "1.4.2",
+    theme: "dark", gpu: "RTX 3070", hotkey: "Fn", version: "1.4.3",
     license: { licensed: true, daysLeft: 23, exp: "2026-08-04", reason: "ok", customer: "demo@buyer" },
     status: "idle",
     stats: { wordsToday: 2481, dictations: 37, wordsTotal: 184920, wpm: 132 },
@@ -835,12 +836,13 @@ const STT_PROVIDERS = {
     ] },
 };
 function sttProvider() { return STT_PROVIDERS[state.settings.sttProvider] || STT_PROVIDERS.groq; }
-function sttActiveLabel() {
-  const s = state.settings;
-  if (s.sttBackend === "cloud") {
-    return `Активно: Хмара · ${sttProvider().label}${s.sttModel ? " · " + esc(s.sttModel) : ""}`;
-  }
-  return "Активно: Локально (на вашому пристрої)";
+function sttModeCard(id, title, icon, sub) {
+  const on = state.settings.sttBackend === id;
+  return `<button class="mode-card${on ? " on" : ""}" data-stt="${id}" role="radio"
+      aria-checked="${on ? "true" : "false"}" aria-label="${esc(title)} — ${esc(sub)}">
+      <span class="mc-ic">${svg(icon, 20)}</span>
+      <span class="mc-tx"><span class="mc-t">${esc(title)}</span><span class="mc-s">${esc(sub)}</span></span>
+      <span class="mc-check">${svg(ICON.check, 13)}</span></button>`;
 }
 function sttModelBadgesHtml() {
   const p = sttProvider();
@@ -858,34 +860,26 @@ function sttModelOptions() {
 function sttKeyRowHtml() {
   const p = sttProvider();
   if (p.reuseGroqKey) {
-    return `<div class="note ok" style="margin:0">Використовує той самий ключ Groq, що й полірування (нижче). Другий ключ не потрібен.</div>`;
+    return `<div class="cloud-hint">Ключ спільний із поліруванням Groq (нижче) — другий не потрібен.</div>`;
   }
-  return `<div class="srow"><div style="min-width:0"><div class="lab">API-ключ ${esc(p.label)}</div>
-      <div class="hint">Вставте свій ключ — оплата йде вашому провайдеру (BYOK)</div></div>
-    <div class="key-wrap"><input class="inp mono" id="${p.keyProp}" type="password" value="${esc(state.settings[p.keyProp] || "")}" placeholder="ключ…" aria-label="API-ключ ${esc(p.label)}"></div></div>`;
+  return `<div class="crow"><span class="crow-l">Ключ ${esc(p.label)}</span>
+    <span class="crow-r key-wrap"><input class="inp mono" id="${p.keyProp}" type="password" value="${esc(state.settings[p.keyProp] || "")}" placeholder="ключ…" aria-label="API-ключ ${esc(p.label)}"></span></div>`;
 }
 function sttCloudHtml() {
   const p = sttProvider();
-  return `<div class="caution" role="note">
-      <div class="ci">${svg(ICON.warn, 16)}</div>
-      <div class="ct"><div class="cth">Хмара — аудіо покидає пристрій</div>
-        <div class="ctb">У хмарному режимі аудіо кожної диктовки йде на сервери провайдера. Локальні укр-переваги (fine-tune, анти-русифікація, ru-retry) не діють.</div></div></div>
-    <div class="srow"><div style="min-width:0"><div class="lab">Сервіс</div>
-        <div class="hint">Провайдер розпізнавання — свій ключ (BYOK)</div></div>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
-        <select class="sel" id="sttProvider" aria-label="Сервіс розпізнавання">${sttProviderOptions()}</select>
-        <a class="btn ghost" id="sttKeyLink" href="${p.keyUrl}" target="_blank" rel="noopener" style="white-space:nowrap;padding:9px 13px">Отримати ключ →</a></div></div>
+  return `<div class="cloud-card">
+    <div class="cloud-warn">${svg(ICON.warn, 15)}<span>Аудіо йде на сервери провайдера. Локальні укр-переваги вимкнено.</span></div>
+    <div class="crow"><span class="crow-l">Сервіс</span>
+      <span class="crow-r"><select class="sel" id="sttProvider" aria-label="Сервіс розпізнавання">${sttProviderOptions()}</select>
+        <a class="lnk" id="sttKeyLink" href="${p.keyUrl}" target="_blank" rel="noopener">Отримати ключ →</a></span></div>
     <div id="sttKeyRow">${sttKeyRowHtml()}</div>
-    <div class="srow"><div style="min-width:0"><div class="lab">Модель</div>
-        <div class="hint">Оберіть модель провайдера</div></div>
-      <select class="sel" id="sttModel" aria-label="Модель розпізнавання">${sttModelOptions()}</select></div>
+    <div class="crow"><span class="crow-l">Модель</span>
+      <span class="crow-r"><select class="sel" id="sttModel" aria-label="Модель розпізнавання">${sttModelOptions()}</select></span></div>
     <div class="stt-badges" id="sttBadges">${sttModelBadgesHtml()}</div>
-    <div class="srow" style="border:none;padding-top:10px"><div style="min-width:0">
-        <div class="lab">Перевірка ключа</div>
-        <div class="hint">Тестовий запит до провайдера — чи працюють ключ і кошти</div></div>
-      <button class="btn ghost" id="sttVerify">Перевірити</button></div>
-    <div class="note" id="sttVerifyNote" style="display:none;margin-top:0"></div>
-    <div class="hint" style="margin-top:10px">Ціни орієнтовні — актуальні у провайдера.${p.free ? " У цього сервісу є безкоштовний ліміт." : ""}</div>`;
+    <div class="cloud-foot">
+      <button class="btn pri" id="sttVerify">Перевірити ключ</button>
+      <span class="cloud-price">${p.free ? "Є безкоштовний ліміт · ціни у провайдера" : "Ціни у провайдера"}</span></div>
+    <div class="note" id="sttVerifyNote" style="display:none;margin-top:2px"></div></div>`;
 }
 function toggleRow(label, hint, key, help) {
   const on = state.settings[key];
@@ -933,12 +927,12 @@ function renderSettings(el) {
         <div class="hint" id="micHint" style="margin-top:12px"></div></div>`,
     model: `
       <div class="panel"><h2 class="lab-h">Розпізнавання${hbtn("hlp-model")}</h2>
-        <div class="desc">Локально на вашому пристрої — або через хмарний сервіс зі своїм ключем</div>
+        <div class="desc">Оберіть, де розпізнавати мовлення — активний спосіб підсвічено</div>
         ${hnote("hlp-model", "Локально — приватно, на вашому GPU/CPU, з українським fine-tune. Хмара — швидко й без GPU, але аудіо йде на сервери провайдера, і локальні укр-переваги не діють.")}
-        <div class="seg" role="group" aria-label="Спосіб розпізнавання" style="margin-top:12px">
-          <button data-stt="local" class="${s.sttBackend === "local" ? "on" : ""}" aria-pressed="${s.sttBackend === "local"}">Локально</button>
-          <button data-stt="cloud" class="${s.sttBackend === "cloud" ? "on" : ""}" aria-pressed="${s.sttBackend === "cloud"}">Хмара</button></div>
-        <div class="stt-active" id="sttActive">${sttActiveLabel()}</div>
+        <div class="mode-grid" id="sttModes" role="radiogroup" aria-label="Спосіб розпізнавання">
+          ${sttModeCard("local", "Локально", ICON.chip, "Приватно · на вашому GPU · укр-переваги")}
+          ${sttModeCard("cloud", "Хмара", ICON.cloud, "Швидко · без GPU · свій ключ")}
+        </div>
         <div id="sttLocal"${s.sttBackend === "cloud" ? " hidden" : ""}>
           <div class="mcards" id="mcards" role="radiogroup" aria-label="Модель розпізнавання" style="margin-top:14px"></div>
           <div class="srow" style="margin-top:6px"><div style="min-width:0"><div class="lab">Пристрій обробки</div>
@@ -1248,21 +1242,19 @@ function bindSttCloud(el) {
   };
 }
 function bindSttPane(el) {
-  const segBtns = [...el.querySelectorAll('.seg [data-stt]')];
-  segBtns.forEach((b) => {
+  const cards = [...el.querySelectorAll("#sttModes [data-stt]")];
+  cards.forEach((b) => {
     b.onclick = () => {
       const v = b.dataset.stt;
       state.settings.sttBackend = v;
-      segBtns.forEach((x) => {
+      cards.forEach((x) => {
         const on = x === b;
         x.classList.toggle("on", on);
-        x.setAttribute("aria-pressed", on ? "true" : "false");
+        x.setAttribute("aria-checked", on ? "true" : "false");
       });
       const local = el.querySelector("#sttLocal"), cloud = el.querySelector("#sttCloud");
       if (local) local.toggleAttribute("hidden", v !== "local");
       if (cloud) cloud.toggleAttribute("hidden", v !== "cloud");
-      const act = el.querySelector("#sttActive");
-      if (act) act.innerHTML = sttActiveLabel();
       saveSettings();
     };
   });

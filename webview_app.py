@@ -464,18 +464,19 @@ def run() -> None:
     except Exception:
         pass
 
-    # First run (onboarding) opens maximized so it never appears in the cramped,
-    # half-collapsed state a small initial window shows on some Windows setups.
-    if not flow.config.get("onboarded", True):
-        def _maximize_first_run():
-            try:
-                window.maximize()
-            except Exception as e:
-                flow.log(f"first-run maximize skipped ({e.__class__.__name__}: {e})")
+    # Open maximized so the window never appears in the cramped, half-collapsed
+    # state a small initial size shows on high-DPI Windows (the CSS width falls
+    # under the sidebar-collapse breakpoint). Applies on every launch, not just
+    # first run, because an already-onboarded user hit the small window too.
+    def _maximize_on_load():
         try:
-            window.events.loaded += _maximize_first_run
-        except Exception:
-            pass
+            window.maximize()
+        except Exception as e:
+            flow.log(f"maximize skipped ({e.__class__.__name__}: {e})")
+    try:
+        window.events.loaded += _maximize_on_load
+    except Exception:
+        pass
 
     # The floating status pill lives in a Tkinter overlay (flow._start_overlay),
     # not a pywebview window: WebView2 on Windows can't render a transparent,
