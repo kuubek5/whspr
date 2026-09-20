@@ -440,7 +440,7 @@ def run() -> None:
         # the old compact size; this opens comfortably on a 1080p screen while
         # min_size still lets it shrink. background matches the dark plateau the
         # UI paints, so there is no near-black flash before the page loads.
-        js_api=api, width=1200, height=820, min_size=(900, 640),
+        js_api=api, width=1360, height=900, min_size=(900, 640),
         background_color="#171319",
     )
     flow.state["webview_window"] = window
@@ -464,17 +464,23 @@ def run() -> None:
     except Exception:
         pass
 
-    # Open maximized so the window never appears in the cramped, half-collapsed
-    # state a small initial size shows on high-DPI Windows (the CSS width falls
-    # under the sidebar-collapse breakpoint). Applies on every launch, not just
-    # first run, because an already-onboarded user hit the small window too.
-    def _maximize_on_load():
+    # Open large and centred (not maximized — full screen is too much). Size to a
+    # generous share of the monitor's work area, capped, so the window is roomy
+    # without covering everything and never lands under the sidebar-collapse
+    # breakpoint. Runs on every launch.
+    def _size_on_load():
         try:
-            window.maximize()
+            dims = window.evaluate_js(
+                "[window.screen.availWidth, window.screen.availHeight]")
+            aw, ah = int(dims[0]), int(dims[1])
+            w = min(1440, max(1100, int(aw * 0.82)))
+            h = min(940, max(720, int(ah * 0.86)))
+            window.resize(w, h)
+            window.move(max(0, (aw - w) // 2), max(0, (ah - h) // 2))
         except Exception as e:
-            flow.log(f"maximize skipped ({e.__class__.__name__}: {e})")
+            flow.log(f"window sizing skipped ({e.__class__.__name__}: {e})")
     try:
-        window.events.loaded += _maximize_on_load
+        window.events.loaded += _size_on_load
     except Exception:
         pass
 

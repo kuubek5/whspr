@@ -49,9 +49,6 @@ Name: "ukrainian"; MessagesFile: "compiler:Languages\Ukrainian.isl"
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
-; checked by default so a normal or silent (auto-update) install creates the
-; desktop shortcut; the user can still untick it in the interactive wizard
-Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"
 Name: "startup"; Description: "Запускати KuubWave при вході в Windows"; Flags: unchecked
 
 [Files]
@@ -62,7 +59,9 @@ Source: "..\dist\KuubWave\*"; DestDir: "{app}"; Flags: recursesubdirs createalls
 ; IconFilename pins each shortcut to the exe's embedded icon explicitly, so a
 ; rebranded build refreshes the shortcut icon instead of showing a stale one.
 Name: "{group}\{#AppName}"; Filename: "{app}\{#AppExe}"; IconFilename: "{app}\{#AppExe}"; IconIndex: 0
-Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; IconFilename: "{app}\{#AppExe}"; IconIndex: 0; Tasks: desktopicon
+; desktop shortcut ALWAYS created — no task gate, so a silent auto-update makes
+; it too (the task-gated version was skipped in silent mode)
+Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#AppExe}"; IconFilename: "{app}\{#AppExe}"; IconIndex: 0
 Name: "{userstartup}\{#AppName}"; Filename: "{app}\{#AppExe}"; Tasks: startup
 
 [Run]
