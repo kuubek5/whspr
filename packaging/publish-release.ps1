@@ -29,7 +29,14 @@ if (-not (Test-Path $Installer)) {
 if (-not (Get-Command gh -ErrorAction SilentlyContinue)) {
     throw "GitHub CLI (gh) not found -- install it and run 'gh auth login'"
 }
-& gh auth status 1>$null 2>$null
+# gh reports state on stderr and through exit codes (e.g. "release view" exits
+# non-zero when the release does not exist yet -- the normal case here). Under
+# ErrorActionPreference=Stop, Windows PowerShell 5.1 turns those stderr writes
+# into terminating errors, so drop to Continue around the native gh calls and
+# check $LASTEXITCODE ourselves. (Cmdlet errors above still stop the script.)
+$ErrorActionPreference = "Continue"
+
+& gh auth status 2>&1 | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "gh is not authenticated -- run 'gh auth login'" }
 
 Write-Host "==> Publishing $Tag to $Repo" -ForegroundColor Cyan
@@ -37,16 +44,13 @@ Write-Host "    asset: $Installer" -ForegroundColor DarkGray
 
 # Refuse to clobber an existing release: a re-cut of the same version is almost
 # always a mistake (the updater keys on the tag). Bump APP_VERSION instead.
-& gh release view $Tag --repo $Repo 1>$null 2>$null
+& gh release view $Tag --repo $Repo 2>&1 | Out-Null
 if ($LASTEXITCODE -eq 0) {
     throw "Release $Tag already exists in $Repo -- bump APP_VERSION and rebuild"
 }
 
 $notes = "KuubWave $Version`n`nAutomatic in-app update: existing installs pick this up on next launch."
-& gh release create $Tag $Installer `
-    --repo $Repo `
-    --title "KuubWave $Version" `
-    --notes $notes
+& gh release create $Tag $Installer --repo $Repo --title "KuubWave $Version" --notes $notes
 if ($LASTEXITCODE -ne 0) { throw "gh release create failed" }
 
 Write-Host "Released $Tag -- installs on $($Version) and newer will offer it automatically." -ForegroundColor Green
