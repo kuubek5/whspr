@@ -108,7 +108,7 @@ function mock(method, args) {
     // Preview the first-run wizard in a plain browser by adding ?onboard to the
     // URL; without it the mock reports an already-onboarded user (no wizard).
     onboarded: !/[?&]onboard\b/.test(location.search),
-    theme: "dark", gpu: "RTX 3070", hotkey: "Fn", version: "1.4.3",
+    theme: "dark", gpu: "RTX 3070", hotkey: "Fn", version: "1.4.4",
     license: { licensed: true, daysLeft: 23, exp: "2026-08-04", reason: "ok", customer: "demo@buyer" },
     status: "idle",
     stats: { wordsToday: 2481, dictations: 37, wordsTotal: 184920, wpm: 132 },
@@ -896,10 +896,6 @@ function renderSettings(el) {
       <div class="panel"><h2>Запуск</h2>
         ${toggleRow("Запускати з Windows", "Автоматично запускати KuubWave при вході в систему", "autostart")}
         ${toggleRow("Звук при завершенні диктовки", "Короткий сигнал, коли текст готовий", "sound")}</div>
-      <div class="panel"><h2>Розпізнавання</h2>
-        ${toggleRow("Автоматичне визначення мови", "KuubWave сам визначить українську чи англійську", "autoLang")}
-        ${toggleRow("Голосова пунктуація", "Слова «кома», «крапка», «знак питання» стають , . ?", "spokenPunctuation")}
-        ${toggleRow("Числа цифрами", "«триста пʼятдесят два» → «352»", "normalizeNumbers")}</div>
       <div class="panel"><h2>Поведінка</h2>
         ${toggleRow("Голосові команди", "«великими літерами», «видали останнє», «переклади англійською» — діють на попередню диктовку", "voiceCommands")}
         ${toggleRow("Режим без утримання", "Тап клавіші вмикає запис, авто-стоп після паузи (або тап ще раз). Інакше — утримувати клавішу", "handsFree",
@@ -943,12 +939,13 @@ function renderSettings(el) {
         <div id="sttCloud"${s.sttBackend === "local" ? " hidden" : ""} style="margin-top:14px">${sttCloudHtml()}</div>
       </div>`,
     ai: `
+      <div class="panel"><h2>Мова та пунктуація</h2>
+        ${toggleRow("Автоматичне визначення мови", "KuubWave сам визначить українську чи англійську", "autoLang")}
+        ${toggleRow("Голосова пунктуація", "Слова «кома», «крапка», «знак питання» стають , . ?", "spokenPunctuation")}
+        ${toggleRow("Числа цифрами", "«триста пʼятдесят два» → «352»", "normalizeNumbers")}</div>
       <div class="panel"><h2>Полірування тексту (AI)</h2>
         <div class="desc">Прибирає слова-паразити, розставляє пунктуацію. Виконується після розпізнавання</div>
-        <div class="caution" role="note">
-          <div class="ci">${svg(ICON.warn, 16)}</div>
-          <div class="ct"><div class="cth">Groq — це хмара</div>
-            <div class="ctb">У режимі Groq текст кожної диктовки залишає цей пристрій і йде на сервери Groq для полірування.</div></div></div>
+        <div class="cloud-warn" role="note" style="margin:2px 0 6px">${svg(ICON.warn, 15)}<span>У режимі Groq текст диктовок іде на сервери Groq для полірування. Ollama — локально.</span></div>
         <div class="srow"><div style="min-width:0"><div class="lab lab-h">Режим${hbtn("hlp-ai")}</div>
             <div class="hint">Ollama — локально й безкоштовно. Groq — швидко, але текст іде на чужий сервер</div>
             ${hnote("hlp-ai", "Ollama працює просто на вашому ПК — безкоштовно й приватно, текст нікуди не йде. Groq — це хмара: швидше й якісніше, але кожна диктовка вирушає на сервери Groq.")}</div>
@@ -974,7 +971,7 @@ function renderSettings(el) {
             <div><div class="lab">Інструкція для полірування</div>
               <div class="hint">Що саме AI робить з розпізнаним текстом. Порожнє — типова інструкція</div></div>
             <button class="btn ghost" id="llmPromptReset" style="padding:8px 13px;font-size:12px">Скинути до типового</button></div>
-          <textarea class="ta mono" id="llmPrompt" rows="8" placeholder="Типова інструкція" aria-label="Інструкція для полірування">${esc(s.llmPrompt || s.llmPromptDefault || "")}</textarea>
+          <textarea class="ta mono" id="llmPrompt" rows="5" placeholder="Типова інструкція" aria-label="Інструкція для полірування">${esc(s.llmPrompt || s.llmPromptDefault || "")}</textarea>
         </div></div>`,
     license: `
       <div class="panel"><h2>Ліцензія</h2>
