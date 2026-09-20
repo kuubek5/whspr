@@ -85,6 +85,15 @@ COLORS = {
     "check": "#12100F",     # the tick drawn inside the aqua dot
 }
 
+# Pill body opacity, 0 (invisible) .. 255 (solid). The default when config has no
+# overlay_opacity; the settings slider overrides it per user. Only the layered
+# renderer can honour it — true per-pixel alpha over the desktop. The Tk
+# colour-key fallback is binary, so it always draws the body solid. Lower = more
+# see-through, but the text/dot contrast drops on light windows.
+PILL_ALPHA = 210
+# Floor for the user-chosen opacity (percent): below this the text stops reading.
+OPACITY_MIN = 40
+
 # Per-bar gain envelope: the wave is centre-weighted, so the level reads as one
 # shape instead of 13 independent bars (mirrors .p-bars nth-child in the mock).
 BAR_GAIN = (.46, .60, .73, .85, .93, .98, 1.0, .98, .93, .85, .73, .60, .46)
@@ -966,6 +975,15 @@ class _LayeredOverlay:
         except (TypeError, ValueError):
             self.margin = 60
 
+        # pill-body alpha (0..255), from overlay_opacity percent; clamped so the
+        # label/dot never fade past readable. The default mirrors PILL_ALPHA.
+        try:
+            op = float(cfg.get("overlay_opacity", round(PILL_ALPHA / 255 * 100)))
+        except (TypeError, ValueError):
+            op = round(PILL_ALPHA / 255 * 100)
+        op = min(100.0, max(OPACITY_MIN, op))
+        self._alpha = int(round(op * 255 / 100))
+
         self.style = _valid_style(cfg.get("overlay_style", "pill"))
         s = self.scale
         r = lambda v: int(round(v * s))  # noqa: E731
@@ -1227,11 +1245,12 @@ class _LayeredOverlay:
         img = Image.alpha_composite(img, sh)
         d = Draw(img)
         d.rounded_rectangle((ox, oy, ox + w * ss, oy + self.H * ss),
-                            radius=Rd, fill=_rgba(COLORS["ring"]))
+                            radius=Rd, fill=_rgba(COLORS["ring"], self._alpha))
         ins = self.HAIR * ss
         d.rounded_rectangle((ox + ins, oy + ins, ox + w * ss - ins,
                              oy + self.H * ss - ins),
-                            radius=max(1.0, Rd - ins), fill=_rgba(COLORS["surface"]))
+                            radius=max(1.0, Rd - ins),
+                            fill=_rgba(COLORS["surface"], self._alpha))
         cyL = self.H / 2.0
         stroke = max(1, int(round(self.STROKE * ss)))
         lx = float(self.PAD)
@@ -1302,10 +1321,11 @@ class _LayeredOverlay:
         sh = sh.filter(self._ImageFilter.GaussianBlur(blur))
         img = Image.alpha_composite(img, sh)
         d = Draw(img)
-        d.ellipse((ox, oy, ox + D * ss, oy + D * ss), fill=_rgba(COLORS["ring"]))
+        d.ellipse((ox, oy, ox + D * ss, oy + D * ss),
+                  fill=_rgba(COLORS["ring"], self._alpha))
         ins = self.HAIR * ss
         d.ellipse((ox + ins, oy + ins, ox + D * ss - ins, oy + D * ss - ins),
-                  fill=_rgba(COLORS["surface"]))
+                  fill=_rgba(COLORS["surface"], self._alpha))
         cx = cy = D / 2.0
         stroke = max(2, int(round(self.ORB_STROKE * ss)))
         inset = self.ORB_STROKE + max(2.0, self.STROKE)
@@ -1384,11 +1404,12 @@ class _LayeredOverlay:
 
         # --- surface + hairline edge ---
         d.rounded_rectangle((ox, oy, ox + w * ss, oy + self.H * ss),
-                            radius=Rd, fill=_rgba(COLORS["ring"]))
+                            radius=Rd, fill=_rgba(COLORS["ring"], self._alpha))
         ins = self.HAIR * ss
         d.rounded_rectangle((ox + ins, oy + ins, ox + w * ss - ins,
                              oy + self.H * ss - ins),
-                            radius=max(1.0, Rd - ins), fill=_rgba(COLORS["surface"]))
+                            radius=max(1.0, Rd - ins),
+                            fill=_rgba(COLORS["surface"], self._alpha))
 
         cyL = self.H / 2.0
         lx = float(self.PAD)

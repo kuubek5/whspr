@@ -70,6 +70,7 @@ class Api:
                 # "pill" | "orb" | "dock" — ui.StatusOverlay owns the meaning
                 "overlayStyle": c.get("overlay_style", "pill"),
                 "overlayScale": c.get("overlay_scale", 100),
+                "overlayOpacity": c.get("overlay_opacity", 82),
                 "sound": c.get("sound", False),
                 "autoLang": c.get("auto_lang", False),
                 "model": c.get("model_uk", "stock"),
@@ -271,7 +272,7 @@ class Api:
         c["autostart"] = bool(s.get("autostart"))
         c["overlay"] = bool(s.get("floatingPanel"))
         old_pill = (c.get("overlay_position"), c.get("overlay_scale"),
-                    c.get("overlay_style"))
+                    c.get("overlay_style"), c.get("overlay_opacity"))
         # overlay style: exactly one of the three shapes the overlay can draw;
         # anything else (junk, a future name) keeps the current value rather
         # than landing an unrenderable style in config.json
@@ -294,6 +295,10 @@ class Api:
             c["overlay_position"] = pos.strip()
         try:
             c["overlay_scale"] = min(140, max(80, int(s.get("overlayScale", 100))))
+        except (TypeError, ValueError):
+            pass
+        try:
+            c["overlay_opacity"] = min(100, max(40, int(s.get("overlayOpacity", 82))))
         except (TypeError, ValueError):
             pass
         c["sound"] = bool(s.get("sound"))
@@ -330,7 +335,7 @@ class Api:
         # the pill bakes size and placement in when it is built, so it only
         # moves if we rebuild it — and only bother when those two actually changed
         if (c.get("overlay_position"), c.get("overlay_scale"),
-                c.get("overlay_style")) != old_pill:
+                c.get("overlay_style"), c.get("overlay_opacity")) != old_pill:
             flow.apply_overlay_config()
         if c["input_device"] != old_dev or c["mic_on_demand"] != old_mode:
             flow.restart_stream()

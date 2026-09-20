@@ -278,6 +278,9 @@ DEFAULTS = {
     # whole-pill scale in percent (80–140): height, paddings, dot, wave and
     # fonts all scale together
     "overlay_scale": 100,
+    # pill-body opacity in percent (40–100); 82 ≈ the old solid-with-a-touch-of-
+    # glass look. Only the layered renderer honours it (see ui.PILL_ALPHA).
+    "overlay_opacity": 82,
     # mic input device name; "" = system default
     "input_device": "",
     # open the mic only while recording (removes the always-on tray mic

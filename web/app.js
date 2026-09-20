@@ -57,7 +57,8 @@ const state = {
               // overlayPosition is either one of the nine presets ("bottom-center")
               // or a free {x, y} in percent of the FREE space on each axis — exactly
               // the two shapes flow.py's DEFAULTS documents for overlay_position.
-              overlayStyle: "pill", overlayPosition: "bottom-center", overlayScale: 100 },
+              overlayStyle: "pill", overlayPosition: "bottom-center", overlayScale: 100,
+              overlayOpacity: 82 },
   devices: [],
   models: [],
   dictionary: { hotwords: "", commands: [] },
@@ -1287,13 +1288,14 @@ function fpXY() {
   return { x: FP_HX[m[2]], y: FP_VY[m[1]] };
 }
 const fpScale = () => Math.max(80, Math.min(140, +state.settings.overlayScale || 100));
+const fpOpacity = () => Math.max(40, Math.min(100, +state.settings.overlayOpacity || 82));
 function fpPlaceStyle() {
   // left:x% + translate(-x%) + transform-origin:x% puts the widget's own x% point
   // on the screen's x% point, i.e. its visual left edge lands at x% of the free
   // space. That keeps it inside the display for any x,y in 0..100, at any scale.
   const { x, y } = fpXY(), sc = fpScale() / 100;
   return `left:${x}%;top:${y}%;transform:translate(${-x}%,${-y}%);transform-origin:${x}% ${y}%;`
-    + `--fpsc:1;font-size:${(FP_PILL_CQ * sc).toFixed(3)}cqw`;
+    + `--fpsc:1;--fp-op:${fpOpacity()};font-size:${(FP_PILL_CQ * sc).toFixed(3)}cqw`;
 }
 function fpPosText() {
   const { x, y } = fpXY(), p = fpPresetAt(x, y);
@@ -1347,6 +1349,15 @@ function floatingPanel() {
               <input type="range" class="fp-range" id="fpSize" min="80" max="140" step="5"
                 value="${fpScale()}" aria-valuetext="${fpScale()}%">
               <output class="fp-sizeval" id="fpSizeVal" for="fpSize">${fpScale()}%</output>
+            </div>
+          </div>
+          <div class="fp-field">
+            <div class="fp-flab"><label for="fpOpacity">Прозорість</label></div>
+            <div class="fp-fhint">Наскільки крізь панель видно вікна під нею — від 40 % до 100 % (суцільна). Текст і крапка лишаються чіткими.</div>
+            <div class="fp-sizerow">
+              <input type="range" class="fp-range" id="fpOpacity" min="40" max="100" step="2"
+                value="${fpOpacity()}" aria-valuetext="${fpOpacity()}%">
+              <output class="fp-sizeval" id="fpOpacityVal" for="fpOpacity">${fpOpacity()}%</output>
             </div>
           </div>
         </div>
@@ -1411,7 +1422,7 @@ function fpWidgetLabel() {
 function fpCaption() {
   const cap = document.getElementById("fpCap");
   if (!cap) return;
-  cap.innerHTML = `<b>${esc(fpStyleLabel(state.settings.overlayStyle))}</b> · <b>${esc(fpPosText())}</b> · <b>${fpScale()}</b> %`;
+  cap.innerHTML = `<b>${esc(fpStyleLabel(state.settings.overlayStyle))}</b> · <b>${esc(fpPosText())}</b> · <b>${fpScale()}</b> % · прозорість <b>${fpOpacity()}</b> %`;
 }
 function fpPaint() {
   const stage = document.getElementById("fpStage");
@@ -1513,6 +1524,18 @@ function fpBind() {
     if (out) out.textContent = v + "%";
     const w = document.getElementById("fpW");
     if (w) w.setAttribute("style", fpPlaceStyle());
+    fpCaption();
+    saveSettingsSoon();
+  };
+  const op = document.getElementById("fpOpacity");
+  if (op) op.oninput = () => {
+    const v = Math.max(40, Math.min(100, +op.value || 82));
+    state.settings.overlayOpacity = v;
+    op.setAttribute("aria-valuetext", v + "%");
+    const out = document.getElementById("fpOpacityVal");
+    if (out) out.textContent = v + "%";
+    const w = document.getElementById("fpW");
+    if (w) w.style.setProperty("--fp-op", v);
     fpCaption();
     saveSettingsSoon();
   };
