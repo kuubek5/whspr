@@ -104,7 +104,7 @@ function mock(method, args) {
     // Preview the first-run wizard in a plain browser by adding ?onboard to the
     // URL; without it the mock reports an already-onboarded user (no wizard).
     onboarded: !/[?&]onboard\b/.test(location.search),
-    theme: "dark", gpu: "RTX 3070", hotkey: "Fn", version: "1.2.0",
+    theme: "dark", gpu: "RTX 3070", hotkey: "Fn", version: "1.3.0",
     license: { licensed: true, daysLeft: 23, exp: "2026-08-04", reason: "ok", customer: "demo@buyer" },
     status: "idle",
     stats: { wordsToday: 2481, dictations: 37, wordsTotal: 184920, wpm: 132 },
@@ -576,6 +576,20 @@ function doInstallUpdate() {
     onConfirm: () => api("install_update", state.update.url),
   });
 }
+// manual "check now" from Settings: same check as on boot, but always speaks —
+// offers the install if there is one, otherwise confirms you are up to date
+async function checkUpdateManual(btn) {
+  const label = btn && btn.textContent;
+  if (btn) { btn.disabled = true; btn.textContent = "Перевіряю…"; }
+  try {
+    const u = await api("check_update");
+    state.update = u || { available: false };
+    if (state.update.available) doInstallUpdate();
+    else toast(`У вас найновіша версія${state.version ? " (v" + state.version + ")" : ""}`);
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = label || "Перевірити оновлення"; }
+  }
+}
 
 // ================= HISTORY =================
 // Day grouping keys off the real calendar day the bridge sends per row
@@ -816,7 +830,12 @@ function renderSettings(el) {
       <div class="panel"><h2>Гаряча клавіша</h2>
         <div class="hkwrap"><span class="keycap" id="hkCap">${esc(state.hotkey)}</span>
           <button class="btn ghost" id="hotkeyBtn">Змінити</button></div>
-        <div class="hint" style="margin-top:14px">Утримувати для диктування — натисніть «Змінити» та виконайте потрібну комбінацію</div></div>`,
+        <div class="hint" style="margin-top:14px">Утримувати для диктування — натисніть «Змінити» та виконайте потрібну комбінацію</div></div>
+      <div class="panel"><h2>Оновлення</h2>
+        <div class="srow"><div style="min-width:0">
+            <div class="lab">Версія ${state.version ? "v" + esc(state.version) : "—"}</div>
+            <div class="hint">KuubWave перевіряє оновлення сам при запуску й пропонує встановити нову версію</div></div>
+          <button class="btn ghost" id="chkUpdBtn">Перевірити оновлення</button></div></div>`,
     floating: floatingPanel(),
     mic: `
       <div class="panel"><h2>Мікрофон</h2>
@@ -923,6 +942,8 @@ function renderSettings(el) {
 
   if (tab === "general") {
     el.querySelector("#hotkeyBtn").onclick = captureHotkey;
+    const cu = el.querySelector("#chkUpdBtn");
+    if (cu) cu.onclick = (e) => checkUpdateManual(e.currentTarget);
   }
   if (tab === "floating") fpBind();
   if (tab === "mic") {

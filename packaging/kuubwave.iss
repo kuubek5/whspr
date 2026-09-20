@@ -5,7 +5,11 @@
 ; Output: packaging\Output\kuubwave-setup.exe
 
 #define AppName "KuubWave"
-#define AppVersion "1.2.0"
+; build.ps1 passes the real version from flow.APP_VERSION via /DAppVersion; this
+; is only the fallback when ISCC is run by hand without that override.
+#ifndef AppVersion
+  #define AppVersion "1.3.0"
+#endif
 #define AppPublisher "KuubWave"
 #define AppExe "KuubWave.exe"
 

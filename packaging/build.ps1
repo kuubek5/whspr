@@ -4,6 +4,14 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path $PSScriptRoot -Parent
 Set-Location $root
 
+# Single source of truth for the version: flow.APP_VERSION. Both the installer
+# (Inno /DAppVersion) and the update check read the same string, so a bump in
+# one place can never drift from the other.
+$verMatch = Select-String -Path "$root\flow.py" -Pattern '^APP_VERSION\s*=\s*"([^"]+)"' | Select-Object -First 1
+if (-not $verMatch) { throw "APP_VERSION not found in flow.py" }
+$AppVersion = $verMatch.Matches[0].Groups[1].Value
+Write-Host "==> Version $AppVersion (from flow.APP_VERSION)" -ForegroundColor Cyan
+
 Write-Host "==> PyInstaller build" -ForegroundColor Cyan
 & "$root\.venv\Scripts\pyinstaller.exe" packaging\kuubwave.spec --noconfirm `
     --distpath dist --workpath build
@@ -28,7 +36,7 @@ if (-not $iscc) {
 }
 
 Write-Host "==> Inno Setup packaging" -ForegroundColor Cyan
-& $iscc packaging\kuubwave.iss
+& $iscc "/DAppVersion=$AppVersion" packaging\kuubwave.iss
 if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
 
 # Report what was actually produced rather than a hardcoded name: the installer
