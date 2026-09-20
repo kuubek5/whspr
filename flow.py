@@ -17,6 +17,9 @@ import logging.handlers
 import sqlite3
 import threading
 import collections
+import io
+import wave
+import uuid
 import urllib.error
 import urllib.request
 
@@ -168,7 +171,7 @@ from faster_whisper import WhisperModel
 import text_fixes
 
 # ---------------- Config ----------------
-APP_VERSION = "1.3.1"  # single source of truth; build.ps1 feeds it to Inno
+APP_VERSION = "1.4.0"  # single source of truth; build.ps1 feeds it to Inno
 GITHUB_REPO = "kuubek5/kuubwave"  # public releases-only repo the updater polls
 # Cloudflare (in front of Groq) 403s urllib's default agent — send a browser one
 HTTP_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -327,6 +330,15 @@ DEFAULTS = {
     "groq_api_key": "",
     "groq_model": "openai/gpt-oss-20b",
     "ollama_model": "qwen2.5:7b",
+    # --- recognition backend (BYOK cloud STT) ---
+    # "local" = on-device Whisper (default); "cloud" = a provider's STT API.
+    "stt_backend": "local",
+    # provider + model when stt_backend == "cloud"
+    "stt_provider": "groq",              # groq | openai | elevenlabs
+    "stt_model": "whisper-large-v3",
+    # per-provider keys. Groq reuses groq_api_key (shared with LLM polish).
+    "openai_api_key": "",
+    "elevenlabs_api_key": "",
     "autostart": False,
     # first-run onboarding gate. True by default on PURPOSE: an existing user
     # whose config.json predates this key gets True (load_config copies DEFAULTS
@@ -1221,6 +1233,88 @@ def download_update(url: str) -> bool:
         log(f"update download failed ({e.__class__.__name__}: {e})")
         set_download(False)
         return False
+
+
+# ---------------- Cloud recognition (BYOK) ----------------
+def _wav_bytes(audio) -> bytes:
+    """Float32 mono @ SAMPLE_RATE -> 16-bit PCM WAV bytes for a multipart upload."""
+    pcm = (np.clip(audio, -1.0, 1.0) * 32767.0).astype("<i2")
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(SAMPLE_RATE)
+        w.writeframes(pcm.tobytes())
+    return buf.getvalue()
+
+
+def _multipart(fields: dict, file_field: str, filename: str, filedata: bytes,
+               filetype: str = "audio/wav"):
+    """Build a multipart/form-data body (urllib has no multipart helper)."""
+    boundary = "----kuubwave" + uuid.uuid4().hex
+    crlf = "\r\n"
+    out = io.BytesIO()
+    for k, v in fields.items():
+        if v is None:
+            continue
+        out.write(("--" + boundary + crlf).encode())
+        out.write((f'Content-Disposition: form-data; name="{k}"' + crlf + crlf).encode())
+        out.write((str(v) + crlf).encode())
+    out.write(("--" + boundary + crlf).encode())
+    out.write((f'Content-Disposition: form-data; name="{file_field}"; '
+               f'filename="{filename}"' + crlf).encode())
+    out.write((f"Content-Type: {filetype}" + crlf + crlf).encode())
+    out.write(filedata)
+    out.write(crlf.encode())
+    out.write(("--" + boundary + "--" + crlf).encode())
+    return out.getvalue(), "multipart/form-data; boundary=" + boundary
+
+
+def _cloud_transcribe(audio, lang_hint: str | None = None) -> str:
+    """Send the clip to the configured cloud STT provider and return the text.
+
+    BYOK: each provider uses the user's own key. Groq reuses groq_key() (shared
+    with LLM polish); OpenAI/ElevenLabs use their own keys. Raises on any failure
+    so the caller can fall back to a status message rather than pasting nothing."""
+    provider = config.get("stt_provider", "groq")
+    model = config.get("stt_model", "whisper-large-v3")
+    wav = _wav_bytes(audio)
+    if provider == "groq":
+        key = groq_key()
+        if not key:
+            raise RuntimeError("no Groq API key")
+        url = "https://api.groq.com/openai/v1/audio/transcriptions"
+        fields = {"model": model, "response_format": "json"}
+        if lang_hint:
+            fields["language"] = lang_hint
+        headers = {"Authorization": "Bearer " + key}
+    elif provider == "openai":
+        key = (os.environ.get("OPENAI_API_KEY") or config.get("openai_api_key") or "").strip()
+        if not key:
+            raise RuntimeError("no OpenAI API key")
+        url = "https://api.openai.com/v1/audio/transcriptions"
+        fields = {"model": model, "response_format": "json"}
+        if lang_hint:
+            fields["language"] = lang_hint
+        headers = {"Authorization": "Bearer " + key}
+    elif provider == "elevenlabs":
+        key = (os.environ.get("ELEVENLABS_API_KEY") or config.get("elevenlabs_api_key") or "").strip()
+        if not key:
+            raise RuntimeError("no ElevenLabs API key")
+        url = "https://api.elevenlabs.io/v1/speech-to-text"
+        fields = {"model_id": model}
+        if lang_hint:
+            fields["language_code"] = lang_hint
+        headers = {"xi-api-key": key}
+    else:
+        raise RuntimeError(f"unknown STT provider {provider!r}")
+    body, ctype = _multipart(fields, "file", "audio.wav", wav)
+    headers["Content-Type"] = ctype
+    headers["User-Agent"] = HTTP_UA  # Cloudflare 403s the default urllib agent
+    req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+    with urllib.request.urlopen(req, timeout=60) as r:
+        data = json.load(r)
+    return (data.get("text") or "").strip()
 
 
 # ---------------- Licensing ----------------
@@ -2176,111 +2270,127 @@ def _transcribe_impl(pre: list, cur: list, target_hwnd: int) -> None:
         else:
             # loud enough to need no boost at all — clear any earlier warning
             state["mic_too_quiet"] = False
-        hotwords = _build_hotwords(config.get("dictionary", ""))
-        t0 = time.time()
-        # auto language: let Whisper detect instead of the manual F10 choice.
-        # Detection needs the multilingual stock model and no Ukrainian prompt
-        # bias, so auto mode trades the uk fine-tune for hands-off language.
-        auto = config.get("auto_lang", False)
-        if auto:
-            model = load_model(MODEL_NAME)
-            tr_lang, initial_prompt = None, None
-        else:
-            lang = LANGUAGES[state["lang"]]
-            model = model_for(lang)
-            tr_lang = lang
-            initial_prompt = UK_INITIAL_PROMPT if lang == "uk" else None
-        # hallucination_silence_threshold drops text invented over silent gaps,
-        # but it can only find those gaps with word_timestamps, and that forced
-        # alignment pass costs ~5-10% extra latency per segment. Push-to-talk
-        # clips rarely contain long silences, so the guard is opt-in.
-        guard = {}
-        if config.get("hallucination_guard", False):
-            guard = {"word_timestamps": True, "hallucination_silence_threshold": 2.0}
-        # vad_filter is a config key, not a constant. The old comment here
-        # claimed Silero was off because onnxruntime "hangs for minutes on this
-        # machine"; that is no longer true — measured on this machine,
-        # onnxruntime imports in 0.3 s, faster_whisper.vad loads in 0.24 s and
-        # get_speech_timestamps runs in 138 ms on an 8 s clip, i.e. it is cheap.
-        # The real reason it stays off by default is accuracy, not speed: see
-        # the "vad" entry in DEFAULTS. No vad_parameters are passed — the
-        # faster-whisper defaults are sensible and there is no measurement here
-        # justifying anything else.
-        def _decode(prompt, temperature=None):
-            """One decode pass. Returns (info, text, avg_logprob, no_speech).
-
-            Factored out only so the Russian-drift retry below can run the exact
-            same configuration with one knob changed — every parameter here is
-            the single source of truth for both passes."""
-            kw = dict(
-                language=tr_lang, vad_filter=config.get("vad", False),
-                beam_size=config["beam_size"], hotwords=hotwords,
-                initial_prompt=prompt,
-                condition_on_previous_text=False,
-                # anti-hallucination guards that are OFF by default in
-                # faster-whisper and cost nothing, so they stay on
-                # unconditionally. The temperature fallback and
-                # compression/no-speech thresholds are already on:
-                #   no_repeat_ngram_size — blocks "4 4 4 4 4" / "піп піп" loops
-                #   repetition_penalty   — discourages the model repeating itself
-                no_repeat_ngram_size=3,
-                repetition_penalty=1.1,
-                **guard,
-            )
-            if temperature is not None:
-                kw["temperature"] = temperature
-            segments, inf = model.transcribe(audio, **kw)
-            # materialise the generator once: the text and the two confidence
-            # numbers the filter needs all come from the same single pass
-            segs = list(segments)
-            return (inf,) + _segment_stats(segs)
-
-        info, text, avg_logprob, no_speech_prob = _decode(initial_prompt)
-        if auto:
-            # keep the detected language if it's one we support, else stay put
-            lang = info.language if info.language in LANGUAGES else LANGUAGES[state["lang"]]
-            state["lang"] = LANGUAGES.index(lang)
-        ru = "".join(sorted(set(text) & RU_ONLY_CHARS))
-        log(f"{dur:.1f}s audio -> {time.time() - t0:.2f}s transcribe [{lang}]"
-            f"{' RU-chars:' + ru if ru else ''}: {text!r} "
-            f"(avg_logprob={avg_logprob:.2f}, no_speech={no_speech_prob:.2f})")
-        # Russian drift. 2.0% of this user's 3822 takes came back with Russian in
-        # them ("Тесты", "Релиз", "пошты") — the model phonetically slipping
-        # language, not the user switching. RU_ONLY_CHARS is an exact test with
-        # no false positives: those four letters do not exist in Ukrainian, so
-        # seeing one in a take the user asked to be Ukrainian is proof of drift.
-        # Re-decode with a heavier Ukrainian prompt and the temperature fallback
-        # pinned off (the fallback is often what produced the drift), then keep
-        # whichever pass looks less Russian. Costs one extra ~0.4 s pass on the
-        # 2% of takes that trip it, and never runs in auto-language mode, where
-        # Russian may be exactly what the user is speaking.
-        # text_fixes.looks_russian subsumes the RU_ONLY_CHARS test (a
-        # Russian-only letter alone already scores above the threshold) and adds
-        # Russian function words that contain no such letter — "что", "нужно",
-        # "потому" would otherwise sail through. Measured: 31 of the user's 3834
-        # takes trip it, all genuinely Russian, none false.
-        if (text and lang == "uk" and not auto
-                and config.get("ru_retry", True)
-                and text_fixes.looks_russian(text)):
+        # --- recognition backend: cloud (BYOK) or local (default) ---
+        text = None
+        avg_logprob = no_speech_prob = 0.0
+        lang = LANGUAGES[state["lang"]]
+        if config.get("stt_backend", "local") == "cloud":
+            t0 = time.time()
+            hint = None if config.get("auto_lang", False) else lang
             try:
-                t1 = time.time()
-                _, r_text, r_lp, r_ns = _decode(UK_RETRY_PROMPT, temperature=0.0)
-                r_ru = "".join(sorted(set(r_text) & RU_ONLY_CHARS))
-                log(f"ru-retry {time.time() - t1:.2f}s: {r_text!r} "
-                    f"(RU-chars:{r_ru or '-'}, avg_logprob={r_lp:.2f})")
-                # Accept only a strict improvement, scored the same way the
-                # trigger is. Deliberately NOT the distinct-letter sets `ru` /
-                # `r_ru` that the log line carries: "Тесты и релизы" and "Тесты
-                # і релізи" both reduce to the single letter "ы", so comparing
-                # those sets would reject a retry that fixed half the Russian in
-                # the take. An empty or equally-Russian retry must never replace
-                # a transcript the user can still fix by hand; ties go to the
-                # first pass.
-                if r_text and text_fixes.ru_score(r_text) < text_fixes.ru_score(text):
-                    text, avg_logprob, no_speech_prob, ru = r_text, r_lp, r_ns, r_ru
-                    log("ru-retry accepted")
+                text = _cloud_transcribe(audio, hint)
             except Exception as e:
-                log(f"ru-retry failed ({e.__class__.__name__}: {e}) — keeping first pass")
+                log(f"cloud STT failed ({e.__class__.__name__}: {e})")
+                done_msg, ok = "хмара недоступна", False
+                return
+            log(f"{dur:.1f}s audio -> {time.time()-t0:.2f}s cloud "
+                f"[{config.get('stt_provider')}/{config.get('stt_model')}]: {text!r}")
+        if text is None:
+            hotwords = _build_hotwords(config.get("dictionary", ""))
+            t0 = time.time()
+            # auto language: let Whisper detect instead of the manual F10 choice.
+            # Detection needs the multilingual stock model and no Ukrainian prompt
+            # bias, so auto mode trades the uk fine-tune for hands-off language.
+            auto = config.get("auto_lang", False)
+            if auto:
+                model = load_model(MODEL_NAME)
+                tr_lang, initial_prompt = None, None
+            else:
+                lang = LANGUAGES[state["lang"]]
+                model = model_for(lang)
+                tr_lang = lang
+                initial_prompt = UK_INITIAL_PROMPT if lang == "uk" else None
+            # hallucination_silence_threshold drops text invented over silent gaps,
+            # but it can only find those gaps with word_timestamps, and that forced
+            # alignment pass costs ~5-10% extra latency per segment. Push-to-talk
+            # clips rarely contain long silences, so the guard is opt-in.
+            guard = {}
+            if config.get("hallucination_guard", False):
+                guard = {"word_timestamps": True, "hallucination_silence_threshold": 2.0}
+            # vad_filter is a config key, not a constant. The old comment here
+            # claimed Silero was off because onnxruntime "hangs for minutes on this
+            # machine"; that is no longer true — measured on this machine,
+            # onnxruntime imports in 0.3 s, faster_whisper.vad loads in 0.24 s and
+            # get_speech_timestamps runs in 138 ms on an 8 s clip, i.e. it is cheap.
+            # The real reason it stays off by default is accuracy, not speed: see
+            # the "vad" entry in DEFAULTS. No vad_parameters are passed — the
+            # faster-whisper defaults are sensible and there is no measurement here
+            # justifying anything else.
+            def _decode(prompt, temperature=None):
+                """One decode pass. Returns (info, text, avg_logprob, no_speech).
+
+                Factored out only so the Russian-drift retry below can run the exact
+                same configuration with one knob changed — every parameter here is
+                the single source of truth for both passes."""
+                kw = dict(
+                    language=tr_lang, vad_filter=config.get("vad", False),
+                    beam_size=config["beam_size"], hotwords=hotwords,
+                    initial_prompt=prompt,
+                    condition_on_previous_text=False,
+                    # anti-hallucination guards that are OFF by default in
+                    # faster-whisper and cost nothing, so they stay on
+                    # unconditionally. The temperature fallback and
+                    # compression/no-speech thresholds are already on:
+                    #   no_repeat_ngram_size — blocks "4 4 4 4 4" / "піп піп" loops
+                    #   repetition_penalty   — discourages the model repeating itself
+                    no_repeat_ngram_size=3,
+                    repetition_penalty=1.1,
+                    **guard,
+                )
+                if temperature is not None:
+                    kw["temperature"] = temperature
+                segments, inf = model.transcribe(audio, **kw)
+                # materialise the generator once: the text and the two confidence
+                # numbers the filter needs all come from the same single pass
+                segs = list(segments)
+                return (inf,) + _segment_stats(segs)
+
+            info, text, avg_logprob, no_speech_prob = _decode(initial_prompt)
+            if auto:
+                # keep the detected language if it's one we support, else stay put
+                lang = info.language if info.language in LANGUAGES else LANGUAGES[state["lang"]]
+                state["lang"] = LANGUAGES.index(lang)
+            ru = "".join(sorted(set(text) & RU_ONLY_CHARS))
+            log(f"{dur:.1f}s audio -> {time.time() - t0:.2f}s transcribe [{lang}]"
+                f"{' RU-chars:' + ru if ru else ''}: {text!r} "
+                f"(avg_logprob={avg_logprob:.2f}, no_speech={no_speech_prob:.2f})")
+            # Russian drift. 2.0% of this user's 3822 takes came back with Russian in
+            # them ("Тесты", "Релиз", "пошты") — the model phonetically slipping
+            # language, not the user switching. RU_ONLY_CHARS is an exact test with
+            # no false positives: those four letters do not exist in Ukrainian, so
+            # seeing one in a take the user asked to be Ukrainian is proof of drift.
+            # Re-decode with a heavier Ukrainian prompt and the temperature fallback
+            # pinned off (the fallback is often what produced the drift), then keep
+            # whichever pass looks less Russian. Costs one extra ~0.4 s pass on the
+            # 2% of takes that trip it, and never runs in auto-language mode, where
+            # Russian may be exactly what the user is speaking.
+            # text_fixes.looks_russian subsumes the RU_ONLY_CHARS test (a
+            # Russian-only letter alone already scores above the threshold) and adds
+            # Russian function words that contain no such letter — "что", "нужно",
+            # "потому" would otherwise sail through. Measured: 31 of the user's 3834
+            # takes trip it, all genuinely Russian, none false.
+            if (text and lang == "uk" and not auto
+                    and config.get("ru_retry", True)
+                    and text_fixes.looks_russian(text)):
+                try:
+                    t1 = time.time()
+                    _, r_text, r_lp, r_ns = _decode(UK_RETRY_PROMPT, temperature=0.0)
+                    r_ru = "".join(sorted(set(r_text) & RU_ONLY_CHARS))
+                    log(f"ru-retry {time.time() - t1:.2f}s: {r_text!r} "
+                        f"(RU-chars:{r_ru or '-'}, avg_logprob={r_lp:.2f})")
+                    # Accept only a strict improvement, scored the same way the
+                    # trigger is. Deliberately NOT the distinct-letter sets `ru` /
+                    # `r_ru` that the log line carries: "Тесты и релизы" and "Тесты
+                    # і релізи" both reduce to the single letter "ы", so comparing
+                    # those sets would reject a retry that fixed half the Russian in
+                    # the take. An empty or equally-Russian retry must never replace
+                    # a transcript the user can still fix by hand; ties go to the
+                    # first pass.
+                    if r_text and text_fixes.ru_score(r_text) < text_fixes.ru_score(text):
+                        text, avg_logprob, no_speech_prob, ru = r_text, r_lp, r_ns, r_ru
+                        log("ru-retry accepted")
+                except Exception as e:
+                    log(f"ru-retry failed ({e.__class__.__name__}: {e}) — keeping first pass")
         if not text:
             # also the normal outcome when vad_filter is on and Silero judged the
             # whole clip non-speech: `segments` is then empty and there is

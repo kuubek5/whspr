@@ -58,7 +58,10 @@ const state = {
               // or a free {x, y} in percent of the FREE space on each axis — exactly
               // the two shapes flow.py's DEFAULTS documents for overlay_position.
               overlayStyle: "pill", overlayPosition: "bottom-center", overlayScale: 100,
-              overlayOpacity: 82 },
+              overlayOpacity: 82,
+              // ---- cloud recognition (BYOK) ----
+              sttBackend: "local", sttProvider: "groq",
+              sttModel: "whisper-large-v3", openaiKey: "", elevenlabsKey: "" },
   devices: [],
   models: [],
   dictionary: { hotwords: "", commands: [] },
@@ -104,7 +107,7 @@ function mock(method, args) {
     // Preview the first-run wizard in a plain browser by adding ?onboard to the
     // URL; without it the mock reports an already-onboarded user (no wizard).
     onboarded: !/[?&]onboard\b/.test(location.search),
-    theme: "dark", gpu: "RTX 3070", hotkey: "Fn", version: "1.3.0",
+    theme: "dark", gpu: "RTX 3070", hotkey: "Fn", version: "1.4.0",
     license: { licensed: true, daysLeft: 23, exp: "2026-08-04", reason: "ok", customer: "demo@buyer" },
     status: "idle",
     stats: { wordsToday: 2481, dictations: 37, wordsTotal: 184920, wpm: 132 },
@@ -170,7 +173,8 @@ async function boot() {
   // onboarded" so a bridge that predates the flag never traps the user in a wizard
   state.onboarded = (typeof b.onboarded === "boolean") ? b.onboarded : true;
   applyTheme();
-  document.getElementById("gpuBadge").textContent = "Локально · " + state.gpu;
+  // sidebar shows the local/private status; the exact GPU lives in the hero chip
+  document.getElementById("gpuBadge").textContent = "Локально · приватно";
   const vl = document.getElementById("verLine");
   if (vl && state.version) vl.textContent = "v" + state.version;
   paintTopHint();
@@ -374,10 +378,14 @@ function renderHero() {
     h.innerHTML = `<div class="recbtn idle" role="button" tabindex="0" aria-pressed="false"
         aria-label="Очікування. ${esc(previewNote)}">${svg(ICON.mic, 42)}</div>
       <div class="hero-tx"><div class="k">Затисніть <span class="key">${esc(state.hotkey)}</span> і говоріть</div>
-        <div class="s"><span class="s-lock">${svg(ICON.shield, 14)}</span>Диктуйте будь-де на екрані. Розпізнавання йде на вашому GPU — жодне слово не залишає цей компʼютер.</div>
+        <div class="s">${state.settings.sttBackend === "cloud"
+          ? "Диктуйте будь-де на екрані. Хмарне розпізнавання — аудіо йде на сервери провайдера."
+          : "Диктуйте будь-де на екрані. Розпізнавання йде на вашому GPU — жодне слово не залишає цей компʼютер."}</div>
         <div class="wavelane" id="wl" aria-hidden="true"></div>
         <div class="hero-row">
-          <div class="hc"><span class="k2">Пристрій</span><span class="v">${esc(state.gpu)}</span></div>
+          ${state.settings.sttBackend === "cloud"
+            ? `<div class="hc"><span class="k2">Хмара</span><span class="v">${esc((STT_PROVIDERS[state.settings.sttProvider] || {}).label || "Cloud")}</span></div>`
+            : `<div class="hc"><span class="k2">Пристрій</span><span class="v">${esc(state.gpu)}</span></div>`}
           <div class="hc"><span class="k2">Мова</span><span class="v">${state.settings.autoLang ? "UK · авто" : "UK"}</span></div>
           <div class="hc"><span class="k2">Клавіша</span><span class="v">${esc(state.hotkey)}</span></div>
         </div></div>`;
@@ -802,8 +810,70 @@ function drawCmds() {
 
 // ================= SETTINGS =================
 const STABS = [["general", "Загальні", ICON.settings], ["floating", "Панель", ICON.overlay],
-               ["mic", "Мікрофон", ICON.mic], ["model", "Модель", ICON.chip],
-               ["ai", "AI", ICON.shield], ["license", "Ліцензія", ICON.key]];
+               ["mic", "Мікрофон", ICON.mic], ["model", "AI", ICON.chip],
+               ["license", "Ліцензія", ICON.key]];
+
+// Cloud recognition providers (BYOK). Curated model lists — we vetted these for
+// Ukrainian dictation; prices are indicative (the provider is the source of truth).
+const STT_PROVIDERS = {
+  groq: { label: "Groq", free: true, keyUrl: "https://console.groq.com/keys",
+    reuseGroqKey: true,
+    models: [
+      { id: "whisper-large-v3", label: "Whisper large-v3", badges: ["точна", "≈$0.04/год"] },
+      { id: "whisper-large-v3-turbo", label: "Whisper large-v3 turbo", badges: ["швидка", "дешевша"] },
+    ] },
+  openai: { label: "OpenAI", free: false, keyProp: "openaiKey", keyUrl: "https://platform.openai.com/api-keys",
+    models: [
+      { id: "gpt-transcribe", label: "gpt-transcribe", badges: ["найточніша"] },
+      { id: "gpt-4o-mini-transcribe", label: "gpt-4o-mini-transcribe", badges: ["дешевша"] },
+      { id: "whisper-1", label: "whisper-1", badges: ["легасі", "найдешевша"] },
+    ] },
+  elevenlabs: { label: "ElevenLabs", free: true, keyProp: "elevenlabsKey", keyUrl: "https://elevenlabs.io/app/settings/api-keys",
+    models: [
+      { id: "scribe_v2", label: "Scribe v2", badges: ["найкраща укр"] },
+    ] },
+};
+function sttProvider() { return STT_PROVIDERS[state.settings.sttProvider] || STT_PROVIDERS.groq; }
+function sttModelBadgesHtml() {
+  const p = sttProvider();
+  const m = p.models.find((x) => x.id === state.settings.sttModel) || p.models[0];
+  return (m.badges || []).map((b) => `<span class="stt-badge">${esc(b)}</span>`).join("");
+}
+function sttProviderOptions() {
+  return Object.entries(STT_PROVIDERS).map(([id, p]) =>
+    `<option value="${id}"${state.settings.sttProvider === id ? " selected" : ""}>${esc(p.label)}${p.free ? " · безкоштовний ліміт" : ""}</option>`).join("");
+}
+function sttModelOptions() {
+  return sttProvider().models.map((m) =>
+    `<option value="${m.id}"${state.settings.sttModel === m.id ? " selected" : ""}>${esc(m.label)}</option>`).join("");
+}
+function sttKeyRowHtml() {
+  const p = sttProvider();
+  if (p.reuseGroqKey) {
+    return `<div class="note ok" style="margin:0">Використовує той самий ключ Groq, що й полірування (нижче). Другий ключ не потрібен.</div>`;
+  }
+  return `<div class="srow"><div style="min-width:0"><div class="lab">API-ключ ${esc(p.label)}</div>
+      <div class="hint">Вставте свій ключ — оплата йде вашому провайдеру (BYOK)</div></div>
+    <div class="key-wrap"><input class="inp mono" id="${p.keyProp}" type="password" value="${esc(state.settings[p.keyProp] || "")}" placeholder="ключ…" aria-label="API-ключ ${esc(p.label)}"></div></div>`;
+}
+function sttCloudHtml() {
+  const p = sttProvider();
+  return `<div class="caution" role="note">
+      <div class="ci">${svg(ICON.warn, 16)}</div>
+      <div class="ct"><div class="cth">Хмара — аудіо покидає пристрій</div>
+        <div class="ctb">У хмарному режимі аудіо кожної диктовки йде на сервери провайдера. Локальні укр-переваги (fine-tune, анти-русифікація, ru-retry) не діють.</div></div></div>
+    <div class="srow"><div style="min-width:0"><div class="lab">Сервіс</div>
+        <div class="hint">Провайдер розпізнавання — свій ключ (BYOK)</div></div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end">
+        <select class="sel" id="sttProvider" aria-label="Сервіс розпізнавання">${sttProviderOptions()}</select>
+        <a class="btn ghost" id="sttKeyLink" href="${p.keyUrl}" target="_blank" rel="noopener" style="white-space:nowrap;padding:9px 13px">Отримати ключ →</a></div></div>
+    <div id="sttKeyRow">${sttKeyRowHtml()}</div>
+    <div class="srow"><div style="min-width:0"><div class="lab">Модель</div>
+        <div class="hint">Оберіть модель провайдера</div></div>
+      <select class="sel" id="sttModel" aria-label="Модель розпізнавання">${sttModelOptions()}</select></div>
+    <div class="stt-badges" id="sttBadges">${sttModelBadgesHtml()}</div>
+    <div class="hint" style="margin-top:10px">Ціни орієнтовні — актуальні у провайдера.${p.free ? " У цього сервісу є безкоштовний ліміт." : ""}</div>`;
+}
 function toggleRow(label, hint, key, help) {
   const on = state.settings[key];
   return `<div class="srow"><div style="min-width:0">
@@ -849,22 +919,28 @@ function renderSettings(el) {
           <div class="level"><div class="fill" id="levelFill"></div><div class="th"></div></div></div>
         <div class="hint" id="micHint" style="margin-top:12px"></div></div>`,
     model: `
-      <div class="panel"><h2 class="lab-h">Модель розпізнавання${hbtn("hlp-model")}</h2>
-        <div class="desc">Більша — точніша, менша — швидша. Завантажуйте лише те, чим користуєтесь</div>
-        ${hnote("hlp-model", "Модель — це «мозок» розпізнавання. Більша чує точніше, але думає повільніше й вантажить GPU. Менша — швидша й легша, ціною дрібних помилок.")}
-        <div class="mcards" id="mcards" role="radiogroup" aria-label="Модель розпізнавання" style="margin-top:12px"></div>
-        <div class="srow" style="margin-top:6px"><div style="min-width:0"><div class="lab">Пристрій обробки</div>
-            <div class="hint">Де рахувати модель: GPU швидко, CPU повільний запасний. Уся обробка локально</div></div>
-          <select class="sel" id="selGpu" aria-label="Пристрій обробки">
-            <option value="cuda">${esc(state.gpu)} (GPU)</option>
-            <option value="cpu">CPU (запасний варіант)</option></select></div></div>`,
+      <div class="panel"><h2 class="lab-h">Розпізнавання${hbtn("hlp-model")}</h2>
+        <div class="desc">Локально на вашому пристрої — або через хмарний сервіс зі своїм ключем</div>
+        ${hnote("hlp-model", "Локально — приватно, на вашому GPU/CPU, з українським fine-tune. Хмара — швидко й без GPU, але аудіо йде на сервери провайдера, і локальні укр-переваги не діють.")}
+        <div class="seg" role="group" aria-label="Спосіб розпізнавання" style="margin-top:12px">
+          <button data-stt="local" class="${s.sttBackend === "local" ? "on" : ""}" aria-pressed="${s.sttBackend === "local"}">Локально</button>
+          <button data-stt="cloud" class="${s.sttBackend === "cloud" ? "on" : ""}" aria-pressed="${s.sttBackend === "cloud"}">Хмара</button></div>
+        <div id="sttLocal"${s.sttBackend === "cloud" ? " hidden" : ""}>
+          <div class="mcards" id="mcards" role="radiogroup" aria-label="Модель розпізнавання" style="margin-top:14px"></div>
+          <div class="srow" style="margin-top:6px"><div style="min-width:0"><div class="lab">Пристрій обробки</div>
+              <div class="hint">Де рахувати модель: GPU швидко, CPU повільний запасний. Уся обробка локально</div></div>
+            <select class="sel" id="selGpu" aria-label="Пристрій обробки">
+              <option value="cuda">${esc(state.gpu)} (GPU)</option>
+              <option value="cpu">CPU (запасний варіант)</option></select></div></div>
+        <div id="sttCloud"${s.sttBackend === "local" ? " hidden" : ""} style="margin-top:14px">${sttCloudHtml()}</div>
+      </div>`,
     ai: `
       <div class="panel"><h2>Полірування тексту (AI)</h2>
         <div class="desc">Прибирає слова-паразити, розставляє пунктуацію. Виконується після розпізнавання</div>
         <div class="caution" role="note">
           <div class="ci">${svg(ICON.warn, 16)}</div>
           <div class="ct"><div class="cth">Groq — це хмара</div>
-            <div class="ctb">У режимі Groq текст кожної диктовки залишає цей пристрій і йде на сервери Groq. Розпізнавання лишається локальним — у хмару вирушає лише полірування.</div></div></div>
+            <div class="ctb">У режимі Groq текст кожної диктовки залишає цей пристрій і йде на сервери Groq для полірування.</div></div></div>
         <div class="srow"><div style="min-width:0"><div class="lab lab-h">Режим${hbtn("hlp-ai")}</div>
             <div class="hint">Ollama — локально й безкоштовно. Groq — швидко, але текст іде на чужий сервер</div>
             ${hnote("hlp-ai", "Ollama працює просто на вашому ПК — безкоштовно й приватно, текст нікуди не йде. Groq — це хмара: швидше й якісніше, але кожна диктовка вирушає на сервери Groq.")}</div>
@@ -909,6 +985,8 @@ function renderSettings(el) {
             <div class="hint">Показати вступний тур ще раз — крок за кроком. Не змінює ваших налаштувань.</div></div>
           <button class="btn ghost" id="obReplay">Пройти знайомство</button></div></div>`,
   };
+  // recognition + polishing merged into one "AI" tab (shared Groq key)
+  panes.model += panes.ai;
   el.innerHTML = `<h1 class="htitle">Налаштування</h1>
     <div class="stabs" role="tablist" aria-label="Налаштування">${STABS.map(([k, lab, ic]) =>
       `<button class="stab${tab === k ? " on" : ""}" role="tab" id="stab-${k}" aria-selected="${tab === k ? "true" : "false"}"
@@ -959,8 +1037,9 @@ function renderSettings(el) {
     const selG = el.querySelector("#selGpu");
     selG.value = s.device || "cuda";
     selG.onchange = () => { s.device = selG.value; saveSettings(); };
+    bindSttPane(el);
+    bindAiPane(el);
   }
-  if (tab === "ai") bindAiPane(el);
   if (tab === "license") {
     el.querySelector("#licActivate").onclick = async () => {
       const key = el.querySelector("#licKey").value.trim();
@@ -1012,13 +1091,23 @@ function licenseGridHtml() {
 function paintPrivacy() {
   const n = document.getElementById("privacyNote");
   if (!n) return;
-  // the privacy claim has to follow reality: with Groq the text does leave
-  const cloud = state.settings.llm === "groq";
-  n.innerHTML = svg(ICON.shield, 15) + (cloud
-    ? "Розпізнавання — локальне, але полірування надсилає текст у Groq"
-    : "Диктовки ніколи не залишають цей пристрій");
-  n.classList.toggle("warn", cloud);
-  n.classList.toggle("ok", !cloud);
+  // the privacy claim has to follow reality: cloud STT sends the audio, cloud
+  // polish sends the text; only fully-local dictation never leaves the device
+  const sttCloud = state.settings.sttBackend === "cloud";
+  const llmCloud = state.settings.llm === "groq";
+  let msg, warn = true;
+  if (sttCloud) {
+    const prov = (STT_PROVIDERS[state.settings.sttProvider] || {}).label || "хмару";
+    msg = `Хмарне розпізнавання: аудіо надсилається в ${prov}` + (llmCloud ? "; полірування — у Groq" : "");
+  } else if (llmCloud) {
+    msg = "Розпізнавання — локальне, але полірування надсилає текст у Groq";
+  } else {
+    msg = "Диктовки ніколи не залишають цей пристрій";
+    warn = false;
+  }
+  n.innerHTML = svg(ICON.shield, 15) + msg;
+  n.classList.toggle("warn", warn);
+  n.classList.toggle("ok", !warn);
 }
 function bindAiPane(el) {
   const s = state.settings;
@@ -1096,6 +1185,50 @@ function saveSettingsSoon() {
 
 // ---- model library ----
 function fmtMb(mb) { return mb >= 1024 ? (mb / 1024).toFixed(1) + " GB" : mb + " MB"; }
+function bindSttCloud(el) {
+  // (re)bind the controls inside #sttCloud; called on first render and after the
+  // provider changes (which re-renders the block's inner HTML)
+  const prov = el.querySelector("#sttProvider");
+  if (prov) prov.onchange = () => {
+    state.settings.sttProvider = prov.value;
+    // reset the model to the new provider's first option
+    state.settings.sttModel = sttProvider().models[0].id;
+    const cloud = el.querySelector("#sttCloud");
+    if (cloud) { cloud.innerHTML = sttCloudHtml(); bindSttCloud(el); }
+    saveSettingsSoon();
+  };
+  const mdl = el.querySelector("#sttModel");
+  if (mdl) mdl.onchange = () => {
+    state.settings.sttModel = mdl.value;
+    const b = el.querySelector("#sttBadges");
+    if (b) b.innerHTML = sttModelBadgesHtml();
+    saveSettingsSoon();
+  };
+  const p = sttProvider();
+  if (!p.reuseGroqKey && p.keyProp) {
+    const key = el.querySelector("#" + p.keyProp);
+    if (key) key.oninput = () => { state.settings[p.keyProp] = key.value; saveSettingsSoon(); };
+  }
+}
+function bindSttPane(el) {
+  const segBtns = [...el.querySelectorAll('.seg [data-stt]')];
+  segBtns.forEach((b) => {
+    b.onclick = () => {
+      const v = b.dataset.stt;
+      state.settings.sttBackend = v;
+      segBtns.forEach((x) => {
+        const on = x === b;
+        x.classList.toggle("on", on);
+        x.setAttribute("aria-pressed", on ? "true" : "false");
+      });
+      const local = el.querySelector("#sttLocal"), cloud = el.querySelector("#sttCloud");
+      if (local) local.toggleAttribute("hidden", v !== "local");
+      if (cloud) cloud.toggleAttribute("hidden", v !== "cloud");
+      saveSettings();
+    };
+  });
+  bindSttCloud(el);
+}
 function renderModelList(host) {
   if (!host) return;
   const activeIdx = state.models.findIndex((m) => m.active);
@@ -1639,7 +1772,7 @@ function fpWidgetKey(e) {
 const OB_STEPS = ["welcome", "lang", "model", "mic", "hotkey", "license", "done"];
 const OB_LABEL = { welcome: "Вітаємо", lang: "Мова", model: "Модель", mic: "Мікрофон",
                    hotkey: "Клавіша", license: "Ліцензія", done: "Готово" };
-const OB_BRANDMARK = `<svg class="brandmark" width="34" height="34" viewBox="0 0 100 100" fill="none" aria-hidden="true"><g><line x1="50.00" y1="20.00" x2="50.00" y2="9.00" stroke="#33CBBB" stroke-width="2.2" stroke-linecap="round"/><line x1="55.21" y1="20.46" x2="57.06" y2="9.95" stroke="#35CABA" stroke-width="2.2" stroke-linecap="round"/><line x1="60.26" y1="21.81" x2="63.60" y2="12.65" stroke="#39C8B8" stroke-width="2.2" stroke-linecap="round"/><line x1="65.00" y1="24.02" x2="69.25" y2="16.66" stroke="#41C5B5" stroke-width="2.2" stroke-linecap="round"/><line x1="69.28" y1="27.02" x2="73.94" y2="21.46" stroke="#4BC0B0" stroke-width="2.2" stroke-linecap="round"/><line x1="72.98" y1="30.72" x2="77.83" y2="26.64" stroke="#57BAAA" stroke-width="2.2" stroke-linecap="round"/><line x1="75.98" y1="35.00" x2="81.18" y2="32.00" stroke="#66B3A4" stroke-width="2.2" stroke-linecap="round"/><line x1="78.19" y1="39.74" x2="84.14" y2="37.57" stroke="#76AB9C" stroke-width="2.2" stroke-linecap="round"/><line x1="79.54" y1="44.79" x2="86.68" y2="43.53" stroke="#87A395" stroke-width="2.2" stroke-linecap="round"/><line x1="80.00" y1="50.00" x2="88.50" y2="50.00" stroke="#999B8C" stroke-width="2.2" stroke-linecap="round"/><line x1="79.54" y1="55.21" x2="89.15" y2="56.90" stroke="#AB9384" stroke-width="2.2" stroke-linecap="round"/><line x1="78.19" y1="60.26" x2="88.21" y2="63.91" stroke="#BC8B7D" stroke-width="2.2" stroke-linecap="round"/><line x1="75.98" y1="65.00" x2="85.51" y2="70.50" stroke="#CC8375" stroke-width="2.2" stroke-linecap="round"/><line x1="72.98" y1="69.28" x2="81.15" y2="76.14" stroke="#DB7C6F" stroke-width="2.2" stroke-linecap="round"/><line x1="69.28" y1="72.98" x2="75.55" y2="80.45" stroke="#E77669" stroke-width="2.2" stroke-linecap="round"/><line x1="65.00" y1="75.98" x2="69.25" y2="83.34" stroke="#F17164" stroke-width="2.2" stroke-linecap="round"/><line x1="60.26" y1="78.19" x2="62.74" y2="85.00" stroke="#F96E61" stroke-width="2.2" stroke-linecap="round"/><line x1="55.21" y1="79.54" x2="56.31" y2="85.78" stroke="#FD6C5F" stroke-width="2.2" stroke-linecap="round"/><line x1="50.00" y1="80.00" x2="50.00" y2="86.00" stroke="#FF6B5E" stroke-width="2.2" stroke-linecap="round"/><line x1="44.79" y1="79.54" x2="43.69" y2="85.78" stroke="#FD6C5F" stroke-width="2.2" stroke-linecap="round"/><line x1="39.74" y1="78.19" x2="37.26" y2="85.00" stroke="#F96E61" stroke-width="2.2" stroke-linecap="round"/><line x1="35.00" y1="75.98" x2="30.75" y2="83.34" stroke="#F17164" stroke-width="2.2" stroke-linecap="round"/><line x1="30.72" y1="72.98" x2="24.45" y2="80.45" stroke="#E77669" stroke-width="2.2" stroke-linecap="round"/><line x1="27.02" y1="69.28" x2="18.85" y2="76.14" stroke="#DB7C6F" stroke-width="2.2" stroke-linecap="round"/><line x1="24.02" y1="65.00" x2="14.49" y2="70.50" stroke="#CC8375" stroke-width="2.2" stroke-linecap="round"/><line x1="21.81" y1="60.26" x2="11.79" y2="63.91" stroke="#BC8B7D" stroke-width="2.2" stroke-linecap="round"/><line x1="20.46" y1="55.21" x2="10.85" y2="56.90" stroke="#AB9384" stroke-width="2.2" stroke-linecap="round"/><line x1="20.00" y1="50.00" x2="11.50" y2="50.00" stroke="#999B8C" stroke-width="2.2" stroke-linecap="round"/><line x1="20.46" y1="44.79" x2="13.32" y2="43.53" stroke="#87A395" stroke-width="2.2" stroke-linecap="round"/><line x1="21.81" y1="39.74" x2="15.86" y2="37.57" stroke="#76AB9C" stroke-width="2.2" stroke-linecap="round"/><line x1="24.02" y1="35.00" x2="18.82" y2="32.00" stroke="#66B3A4" stroke-width="2.2" stroke-linecap="round"/><line x1="27.02" y1="30.72" x2="22.17" y2="26.64" stroke="#57BAAA" stroke-width="2.2" stroke-linecap="round"/><line x1="30.72" y1="27.02" x2="26.06" y2="21.46" stroke="#4BC0B0" stroke-width="2.2" stroke-linecap="round"/><line x1="35.00" y1="24.02" x2="30.75" y2="16.66" stroke="#41C5B5" stroke-width="2.2" stroke-linecap="round"/><line x1="39.74" y1="21.81" x2="36.40" y2="12.65" stroke="#39C8B8" stroke-width="2.2" stroke-linecap="round"/><line x1="44.79" y1="20.46" x2="42.94" y2="9.95" stroke="#35CABA" stroke-width="2.2" stroke-linecap="round"/></g><text class="bm-k" x="50" y="53" text-anchor="middle" dominant-baseline="central" font-family="'IBM Plex Sans',system-ui,sans-serif" font-weight="700" font-size="40" fill="#FF6B5E">k</text></svg>`;
+const OB_BRANDMARK = `<svg class="brandmark" width="34" height="34" viewBox="0 0 100 100" fill="none" aria-hidden="true"><g><line x1="50.00" y1="21.00" x2="50.00" y2="10.50" stroke="#33CBBB" stroke-width="2.3" stroke-linecap="round"/><line x1="54.54" y1="21.36" x2="56.18" y2="10.99" stroke="#34CABA" stroke-width="2.3" stroke-linecap="round"/><line x1="58.96" y1="22.42" x2="62.21" y2="12.43" stroke="#38C9B9" stroke-width="2.3" stroke-linecap="round"/><line x1="63.17" y1="24.16" x2="67.93" y2="14.81" stroke="#3EC6B6" stroke-width="2.3" stroke-linecap="round"/><line x1="67.05" y1="26.54" x2="73.22" y2="18.04" stroke="#46C2B2" stroke-width="2.3" stroke-linecap="round"/><line x1="70.51" y1="29.49" x2="77.93" y2="22.07" stroke="#51BDAD" stroke-width="2.3" stroke-linecap="round"/><line x1="73.46" y1="32.95" x2="81.96" y2="26.78" stroke="#5DB7A8" stroke-width="2.3" stroke-linecap="round"/><line x1="75.84" y1="36.83" x2="85.19" y2="32.07" stroke="#6BB1A2" stroke-width="2.3" stroke-linecap="round"/><line x1="77.58" y1="41.04" x2="87.57" y2="37.79" stroke="#79AA9B" stroke-width="2.3" stroke-linecap="round"/><line x1="78.64" y1="45.46" x2="89.01" y2="43.82" stroke="#89A394" stroke-width="2.3" stroke-linecap="round"/><line x1="79.00" y1="50.00" x2="89.50" y2="50.00" stroke="#999B8C" stroke-width="2.3" stroke-linecap="round"/><line x1="78.64" y1="54.54" x2="89.01" y2="56.18" stroke="#A99385" stroke-width="2.3" stroke-linecap="round"/><line x1="77.58" y1="58.96" x2="87.57" y2="62.21" stroke="#B98C7E" stroke-width="2.3" stroke-linecap="round"/><line x1="75.84" y1="63.17" x2="85.19" y2="67.93" stroke="#C78577" stroke-width="2.3" stroke-linecap="round"/><line x1="73.46" y1="67.05" x2="81.96" y2="73.22" stroke="#D57F71" stroke-width="2.3" stroke-linecap="round"/><line x1="70.51" y1="70.51" x2="77.93" y2="77.93" stroke="#E1796C" stroke-width="2.3" stroke-linecap="round"/><line x1="67.05" y1="73.46" x2="73.22" y2="81.96" stroke="#EC7467" stroke-width="2.3" stroke-linecap="round"/><line x1="63.17" y1="75.84" x2="67.93" y2="85.19" stroke="#F47063" stroke-width="2.3" stroke-linecap="round"/><line x1="58.96" y1="77.58" x2="62.21" y2="87.57" stroke="#FA6D60" stroke-width="2.3" stroke-linecap="round"/><line x1="54.54" y1="78.64" x2="56.18" y2="89.01" stroke="#FE6C5F" stroke-width="2.3" stroke-linecap="round"/><line x1="50.00" y1="79.00" x2="50.00" y2="89.50" stroke="#FF6B5E" stroke-width="2.3" stroke-linecap="round"/><line x1="45.46" y1="78.64" x2="43.82" y2="89.01" stroke="#FE6C5F" stroke-width="2.3" stroke-linecap="round"/><line x1="41.04" y1="77.58" x2="37.79" y2="87.57" stroke="#FA6D60" stroke-width="2.3" stroke-linecap="round"/><line x1="36.83" y1="75.84" x2="32.07" y2="85.19" stroke="#F47063" stroke-width="2.3" stroke-linecap="round"/><line x1="32.95" y1="73.46" x2="26.78" y2="81.96" stroke="#EC7467" stroke-width="2.3" stroke-linecap="round"/><line x1="29.49" y1="70.51" x2="22.07" y2="77.93" stroke="#E1796C" stroke-width="2.3" stroke-linecap="round"/><line x1="26.54" y1="67.05" x2="18.04" y2="73.22" stroke="#D57F71" stroke-width="2.3" stroke-linecap="round"/><line x1="24.16" y1="63.17" x2="14.81" y2="67.93" stroke="#C78577" stroke-width="2.3" stroke-linecap="round"/><line x1="22.42" y1="58.96" x2="12.43" y2="62.21" stroke="#B98C7E" stroke-width="2.3" stroke-linecap="round"/><line x1="21.36" y1="54.54" x2="10.99" y2="56.18" stroke="#A99385" stroke-width="2.3" stroke-linecap="round"/><line x1="21.00" y1="50.00" x2="10.50" y2="50.00" stroke="#999B8C" stroke-width="2.3" stroke-linecap="round"/><line x1="21.36" y1="45.46" x2="10.99" y2="43.82" stroke="#89A394" stroke-width="2.3" stroke-linecap="round"/><line x1="22.42" y1="41.04" x2="12.43" y2="37.79" stroke="#79AA9B" stroke-width="2.3" stroke-linecap="round"/><line x1="24.16" y1="36.83" x2="14.81" y2="32.07" stroke="#6BB1A2" stroke-width="2.3" stroke-linecap="round"/><line x1="26.54" y1="32.95" x2="18.04" y2="26.78" stroke="#5DB7A8" stroke-width="2.3" stroke-linecap="round"/><line x1="29.49" y1="29.49" x2="22.07" y2="22.07" stroke="#51BDAD" stroke-width="2.3" stroke-linecap="round"/><line x1="32.95" y1="26.54" x2="26.78" y2="18.04" stroke="#46C2B2" stroke-width="2.3" stroke-linecap="round"/><line x1="36.83" y1="24.16" x2="32.07" y2="14.81" stroke="#3EC6B6" stroke-width="2.3" stroke-linecap="round"/><line x1="41.04" y1="22.42" x2="37.79" y2="12.43" stroke="#38C9B9" stroke-width="2.3" stroke-linecap="round"/><line x1="45.46" y1="21.36" x2="43.82" y2="10.99" stroke="#34CABA" stroke-width="2.3" stroke-linecap="round"/></g><text class="bm-k" x="50" y="53" text-anchor="middle" dominant-baseline="central" font-family="'IBM Plex Sans',system-ui,sans-serif" font-weight="700" font-size="40" fill="#FF6B5E">k</text></svg>`;
 let obMicTimer = null, obMicPeak = 0;
 
 function obModelCards() {

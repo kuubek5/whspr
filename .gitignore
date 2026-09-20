@@ -49,3 +49,6 @@ _shot*.py
 # impeccable design-hook scratch. The shared config next to it (ignore rules and
 # the reasons for them) IS committed on purpose — only the cache is per-machine.
 .impeccable/hook.cache.json
+# impeccable live-mode session state is ephemeral (helper server, journals)
+.impeccable/live/
+.impeccable/critique/

@@ -89,6 +89,12 @@ class Api:
                 "groqModel": c.get("groq_model", ""),
                 "ollamaModel": c.get("ollama_model", ""),
                 "groqKeyVisible": False,
+                # cloud recognition (BYOK)
+                "sttBackend": c.get("stt_backend", "local"),
+                "sttProvider": c.get("stt_provider", "groq"),
+                "sttModel": c.get("stt_model", "whisper-large-v3"),
+                "openaiKey": c.get("openai_api_key", ""),
+                "elevenlabsKey": c.get("elevenlabs_api_key", ""),
                 # admin-editable corrector instruction; blank means the UI shows
                 # (and the app uses) the shipped default, exposed alongside so
                 # the settings page can prefill it and offer a reset
@@ -326,6 +332,14 @@ class Api:
         c["groq_api_key"] = s.get("groqKey", "") or ""
         c["groq_model"] = s.get("groqModel", "") or flow.DEFAULTS["groq_model"]
         c["ollama_model"] = s.get("ollamaModel", "") or flow.DEFAULTS["ollama_model"]
+        # cloud recognition (BYOK). Read on every transcribe() call, so no reload
+        # or stream restart is needed for a change to take effect.
+        c["stt_backend"] = "cloud" if s.get("sttBackend") == "cloud" else "local"
+        if s.get("sttProvider") in ("groq", "openai", "elevenlabs"):
+            c["stt_provider"] = s["sttProvider"]
+        c["stt_model"] = s.get("sttModel", "") or flow.DEFAULTS["stt_model"]
+        c["openai_api_key"] = s.get("openaiKey", "") or ""
+        c["elevenlabs_api_key"] = s.get("elevenlabsKey", "") or ""
         # blank (or exactly the default) stores "" so the built-in prompt — and
         # its future improvements — keep applying; a real edit is stored verbatim
         prompt = (s.get("llmPrompt") or "").strip()
