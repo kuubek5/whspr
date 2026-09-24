@@ -172,7 +172,7 @@ from faster_whisper import WhisperModel
 import text_fixes
 
 # ---------------- Config ----------------
-APP_VERSION = "1.4.6"  # single source of truth; build.ps1 feeds it to Inno
+APP_VERSION = "1.4.7"  # single source of truth; build.ps1 feeds it to Inno
 GITHUB_REPO = "kuubek5/kuubwave"  # public releases-only repo the updater polls
 # Cloudflare (in front of Groq) 403s urllib's default agent — send a browser one
 HTTP_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -312,7 +312,7 @@ DEFAULTS = {
     "voice_commands": True,
     # hands-free: tap the hotkey to start, auto-stop after silence (or tap again)
     "hands_free": False,
-    "silence_stop_s": 1.5,   # silence this long ends a hands-free take
+    "silence_stop_s": 2.2,   # silence this long ends a hands-free take
     "max_utterance_s": 60,   # hard cap so a noisy mic can't record forever
     # LLM post-processing: "off" | "groq" | "ollama"
     "llm": "off",
@@ -2638,7 +2638,10 @@ def start_listener() -> "_Listeners":
             # floor RELATIVE to the take's own peak so it scales to any mic
             # instead of assuming a fixed loudness.
             spoke = peak > 0.006          # armed only after real speech
-            floor = max(0.004, peak * 0.3)  # silence = below 30% of this take's peak
+            # silence = well below this take's own peak, but forgiving: a very
+            # quiet mic (rms ~0.004) dips under an aggressive floor between
+            # words, which used to auto-stop the user mid-sentence.
+            floor = max(0.0025, peak * 0.22)
             if spoke and lvl < floor:
                 silent_since = silent_since or time.time()
                 if time.time() - silent_since >= gap:

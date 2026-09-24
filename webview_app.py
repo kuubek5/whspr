@@ -433,6 +433,16 @@ class Api:
 
 def run() -> None:
     """Create the native window(s) and start the webview loop (blocks)."""
+    # Keep WebView2 rendering while the window is hidden in the tray. Without
+    # this, Chromium's native occlusion detection suspends the compositor once
+    # the window is hidden/occluded, and restoring it from the tray after a while
+    # shows a black screen until a repaint — the classic "only a restart fixes
+    # it" symptom. Disabling occlusion calculation keeps the surface painted.
+    prev_args = os.environ.get("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "")
+    flags = "--disable-features=CalculateNativeWinOcclusion " \
+            "--disable-backgrounding-occluded-windows"
+    os.environ["WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS"] = (prev_args + " " + flags).strip()
+
     api = Api()
     window = webview.create_window(
         "KuubWave", os.path.join(WEB_DIR, "index.html"),
