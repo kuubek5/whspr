@@ -356,6 +356,24 @@ DEFAULTS = {
     # current state, the same hysteresis Silero's own get_speech_timestamps uses,
     # so a word trailing off at p=0.4 neither restarts nor starts the timer.
     "vad_speech_threshold": 0.5,
+    # Smart Turn v3 (pipecat-ai/smart-turn-v3, BSD-2, ~8 MB int8 onnx): a model
+    # that hears whether a phrase SOUNDS finished — falling intonation, a
+    # complete clause — rather than whether the mic is quiet. Only used with
+    # autostop_engine "vad". Once the VAD has heard smart_turn_gap_s of silence
+    # after speech we ask it once: P(finished) >= smart_turn_threshold stops the
+    # take right there instead of waiting the full silence_stop_s; anything
+    # lower keeps recording and silence_stop_s still ends the take as before.
+    # The aim: a finished sentence stops ~1.4 s sooner, a mid-sentence pause or
+    # an "е-е" (which the model should hear as unfinished) costs nothing. The
+    # authors report 94% accuracy / 3.7% false "finished" on real Ukrainian; on
+    # TTS sentences cut off mid-word it said "finished" for 66% of them (real
+    # hesitations sound different, but this is unproven on Roma's mic), so if
+    # takes get cut mid-thought, switch this off. Downloaded
+    # on first use into the same HF cache as the Whisper models; if it cannot be
+    # fetched or loaded, hands-free behaves exactly as pure VAD.
+    "smart_turn": True,
+    "smart_turn_gap_s": 0.6,   # silence before we ASK; never stops sooner
+    "smart_turn_threshold": 0.5,
     # LLM post-processing: "off" | "groq" | "ollama"
     "llm": "off",
     # Paste the transcript the moment Whisper is done, then quietly rewrite it
@@ -2165,6 +2183,239 @@ def make_autostop(gap_s: float):
     return RmsAutoStop(gap_s)
 
 
+# ---------------- Smart Turn v3 (semantic end-of-turn) ----------------
+# Pinned to a commit so a re-upload upstream can never silently swap the model
+# (or its input contract) under an installed app.
+SMART_TURN_REPO = "pipecat-ai/smart-turn-v3"
+SMART_TURN_FILE = "smart-turn-v3.2-cpu.onnx"
+SMART_TURN_REV = "f766f81d3cfdf7737ac64aad813d91bbfd56bf93"
+# The model's input window: the LAST 8 s of the turn, zero-padded at the FRONT
+# when shorter (the authors' contract: audio sits at the end of the vector).
+SMART_TURN_S = 8
+# Trailing silence the model is shown. Pipecat runs it the moment its VAD has
+# heard ~0.2 s of silence, so that is what it was tuned on; fed 0.6-1.2 s of
+# silence it drifts towards "finished" whatever was said (measured on 90
+# mid-sentence cuts of Ukrainian TTS: 66% scored >= 0.5 with a 0.25 s tail, 81%
+# with 0.6 s; finished sentences 90% vs 93%). So however late we ask, the
+# audio ends 0.25 s into the pause.
+SMART_TURN_TAIL_S = 0.25
+# Asks per pause. With the tail trimmed (above) a second ask later in the same
+# pause would show the model the very same audio, so one is all that is useful.
+# The gate supports more (each costs one ~50 ms inference) should the input
+# ever change between asks.
+SMART_TURN_MAX_ASKS = 1
+
+
+class SmartTurnGate:
+    """When to ask Smart Turn, and what its answer means. Pure: fed the VAD
+    decision's state (armed, seconds of continuous silence on the audio clock)
+    once per poll; the caller runs the model only when should_ask() says so and
+    hands the probability to verdict().
+
+    Rules: never ask before speech (VadAutoStop not armed) or before `gap_s` of
+    silence — so Smart Turn can never stop a take sooner than that. Ask at most
+    `max_asks` times per pause, spaced one gap apart (asking every poll would
+    burn CPU on the same answer). An ask that would land at or after `stop_s`
+    is skipped — the plain silence rule ends the take then anyway. "Not
+    finished" only means "keep listening": silence_stop_s still applies. Speech
+    resets the per-pause count, so every new pause gets its own ask.
+    After a model failure the gate goes quiet for the rest of the take, which
+    leaves exactly the VAD-only behaviour."""
+
+    def __init__(self, gap_s: float, stop_s: float, threshold: float = 0.5,
+                 max_asks: int = SMART_TURN_MAX_ASKS):
+        # a sub-0.3 s gap would ask inside ordinary between-word gaps
+        self.gap = max(0.3, float(gap_s))
+        self.stop_s = float(stop_s)
+        self.threshold = float(threshold)
+        self.max_asks = max_asks
+        self.asks = 0            # asks in the current pause
+        self.next_due = self.gap
+        self.last_sil = 0.0
+        self.last_p = None
+        self.disabled = False
+
+    def should_ask(self, armed: bool, silence_s: float) -> bool:
+        # silence shrank (or is zero) => the user spoke since the last poll:
+        # this is a new pause, with a fresh budget of asks
+        if silence_s <= 0 or silence_s < self.last_sil - 1e-9:
+            self.asks, self.next_due = 0, self.gap
+        self.last_sil = silence_s
+        if self.disabled or not armed or silence_s <= 0:
+            return False
+        if self.asks >= self.max_asks:
+            return False
+        if self.next_due >= self.stop_s - 1e-9:
+            return False
+        return silence_s >= self.next_due - 1e-9
+
+    def verdict(self, p: float) -> bool:
+        """Record one answer; True = the turn is complete, stop now."""
+        self.asks += 1
+        self.last_p = float(p)
+        # measured from the silence we actually asked at, so a late poll does
+        # not cause a second ask on the very next poll
+        self.next_due = self.last_sil + self.gap
+        return self.last_p >= self.threshold
+
+    def fail(self):
+        self.disabled = True
+
+
+def smart_turn_features(audio: np.ndarray, fe) -> np.ndarray:
+    """Whisper log-mel input for Smart Turn, shape (1, 80, 800), float32.
+
+    The reference (pipecat _whisper_features / transformers WhisperFeatureExtractor
+    with chunk_length=8, do_normalize=True) normalises the WAVEFORM to zero mean,
+    unit variance first, then takes the standard Whisper log-mel. faster_whisper's
+    numpy FeatureExtractor is that same log-mel, so we normalise here and call it
+    with padding=0 (its default 160-sample tail pad shifts every frame: max error
+    0.009 vs 2e-7 with padding=0, measured against the reference). The front
+    zero-padding is part of the normalised signal, exactly as in the reference —
+    it is what tells the model how short the turn was."""
+    n = SMART_TURN_S * SAMPLE_RATE
+    x = np.asarray(audio, dtype=np.float32).reshape(-1)[-n:]
+    if x.size < n:
+        x = np.pad(x, (n - x.size, 0))
+    x = (x - x.mean()) / np.sqrt(x.var() + 1e-7)
+    feats = fe(x, padding=0)
+    if feats.shape != (80, 800):
+        # a faster_whisper upgrade changing the extractor must fail loudly
+        # (=> pure VAD), not feed the model garbage
+        raise ValueError(f"unexpected Smart Turn feature shape {feats.shape}")
+    return feats[None].astype(np.float32)
+
+
+def _load_smart_turn_model():
+    """Fetch (once) and load Smart Turn; returns predict(audio) -> P(finished).
+    Separate from get_smart_turn so tests can make it fail."""
+    from huggingface_hub import hf_hub_download
+    try:
+        # offline first: after the first run this never touches the network
+        path = hf_hub_download(SMART_TURN_REPO, SMART_TURN_FILE,
+                               revision=SMART_TURN_REV, local_files_only=True)
+    except Exception:
+        path = hf_hub_download(SMART_TURN_REPO, SMART_TURN_FILE,
+                               revision=SMART_TURN_REV)
+    import onnxruntime as ort
+    from faster_whisper.feature_extractor import FeatureExtractor
+    so = ort.SessionOptions()
+    # one short inference per pause; keep it off the cores Whisper is about to
+    # need for the transcribe that follows the stop
+    so.inter_op_num_threads = 1
+    so.intra_op_num_threads = 2
+    so.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+    sess = ort.InferenceSession(path, sess_options=so,
+                                providers=["CPUExecutionProvider"])
+    fe = FeatureExtractor(feature_size=80, sampling_rate=SAMPLE_RATE,
+                          chunk_length=SMART_TURN_S)
+
+    def predict(audio: np.ndarray) -> float:
+        out = sess.run(None, {"input_features": smart_turn_features(audio, fe)})
+        # the exported graph ends in a sigmoid: this is already a probability
+        return float(np.asarray(out[0]).reshape(-1)[0])
+
+    predict(np.zeros(SAMPLE_RATE, dtype=np.float32))  # first run allocates
+    return predict
+
+
+_st_model = None
+_st_failed = False
+_st_loading = False
+_st_lock = threading.Lock()
+
+
+def _smart_turn_load_worker():
+    global _st_model, _st_failed, _st_loading
+    t0 = time.time()
+    try:
+        m = _load_smart_turn_model()
+        with _st_lock:
+            _st_model = m
+        log(f"smart-turn: model loaded ({time.time() - t0:.2f}s)")
+    except Exception as e:
+        with _st_lock:
+            _st_failed = True
+        log(f"smart-turn: unavailable ({e.__class__.__name__}: {e}) "
+            f"— hands-free uses plain VAD silence")
+    finally:
+        with _st_lock:
+            _st_loading = False
+
+
+def get_smart_turn(start_load: bool = True):
+    """The loaded Smart Turn predictor, or None. NEVER blocks: if it is not
+    loaded yet the load (and on first use the 8 MB download) is started on a
+    background thread and this take runs on plain VAD. A failed load is logged
+    once and not retried until restart — no network must not mean a download
+    attempt on every take."""
+    global _st_loading
+    with _st_lock:
+        if _st_model is not None or _st_failed:
+            return _st_model
+        if start_load and not _st_loading:
+            _st_loading = True
+            threading.Thread(target=_smart_turn_load_worker, daemon=True).start()
+    return None
+
+
+def smart_turn_enabled() -> bool:
+    return bool(config.get("smart_turn", True)) and \
+        str(config.get("autostop_engine", "vad")).lower() == "vad"
+
+
+def make_smart_turn_gate(dec, stop_s: float):
+    """(predictor, gate) for one hands-free take, or (None, None) when Smart
+    Turn is off, the take is not on the VAD engine, or the model isn't ready."""
+    if getattr(dec, "name", "") != "vad" or not smart_turn_enabled():
+        return None, None
+    model = get_smart_turn()
+    if model is None:
+        return None, None
+    return model, SmartTurnGate(float(config.get("smart_turn_gap_s", 0.6)), stop_s,
+                                float(config.get("smart_turn_threshold", 0.5)))
+
+
+def smart_turn_audio(dec: "VadAutoStop") -> np.ndarray:
+    """The model's input: up to SMART_TURN_S of the take ending
+    SMART_TURN_TAIL_S into the current pause (see SMART_TURN_TAIL_S for why
+    not at "now"). Positions come from the VAD's audio clock, so they index the
+    take's samples exactly however late this poll runs."""
+    n = SMART_TURN_S * SAMPLE_RATE
+    since = dec.silent_since if dec.silent_since is not None else dec.t
+    # + 1 s slack: blocks recorded after the VAD's last scored frame
+    audio, total = _recorded_tail(n + int((dec.t - since) * SAMPLE_RATE)
+                                  + SAMPLE_RATE)
+    end = min(total, int(round((since + SMART_TURN_TAIL_S) * SAMPLE_RATE)))
+    offset = total - len(audio)  # take-sample index of audio[0]
+    stop = max(0, end - offset)
+    return audio[max(0, stop - n):stop]
+
+
+def smart_turn_poll(model, gate: "SmartTurnGate", dec: "VadAutoStop") -> bool:
+    """One Smart Turn check after a VAD poll. Runs the model only when the gate
+    asks for it; True = stop the take now. Never raises: a model error disables
+    Smart Turn for this take (logged) and the VAD silence rule carries on."""
+    sil = dec.silence_s()
+    if not gate.should_ask(dec.armed, sil):
+        return False
+    t0 = time.perf_counter()
+    try:
+        p = model(smart_turn_audio(dec))
+    except Exception as e:
+        gate.fail()
+        log(f"smart-turn: failed ({e.__class__.__name__}: {e}) — plain VAD "
+            f"for this take")
+        return False
+    ms = (time.perf_counter() - t0) * 1000
+    done = gate.verdict(p)
+    log(f"smart-turn: {'complete' if done else 'incomplete'} p={p:.2f} "
+        f"gap={sil * 1000:.0f}ms infer={ms:.0f}ms -> "
+        f"{'stop' if done else 'keep listening'} (thr={gate.threshold:.2f} "
+        f"ask={gate.asks})")
+    return done
+
+
 def _recorded_tail(n_samples: int) -> tuple[np.ndarray, int]:
     """(last n_samples of this take as flat float32, total samples recorded so
     far). Copies only the tail blocks, so it stays cheap on a 60 s take."""
@@ -3440,9 +3691,14 @@ def start_listener() -> "_Listeners":
         dec = make_autostop(gap)
         vad = _vad_model if dec.name == "vad" else None
         fed = 0  # frames of this take already scored by the VAD
-        log(f"hands-free: auto-stop engine={dec.name} gap={gap}s")
+        # Smart Turn rides on the VAD's silence clock; (None, None) = off, not
+        # loaded yet, or rms engine — the loop below is then exactly VAD-only
+        st_model, st_gate = make_smart_turn_gate(dec, gap)
+        st_note = (f" smart-turn ask@{st_gate.gap}s thr={st_gate.threshold}"
+                   if st_gate else "")
+        log(f"hands-free: auto-stop engine={dec.name} gap={gap}s{st_note}")
         while state["recording"]:
-            stop = False
+            stop = smart = False
             if vad is not None:
                 try:
                     stop, fed = vad_poll(vad, dec, fed)
@@ -3451,11 +3707,14 @@ def start_listener() -> "_Listeners":
                     # take on the loudness heuristic instead
                     log(f"hands-free: VAD failed mid-take ({e.__class__.__name__}: "
                         f"{e}) — rms auto-stop for this take")
-                    dec, vad = RmsAutoStop(gap), None
+                    dec, vad, st_gate = RmsAutoStop(gap), None, None
+                if not stop and st_gate is not None and vad is not None:
+                    stop = smart = smart_turn_poll(st_model, st_gate, dec)
             else:
                 stop = dec.feed(state.get("input_level", 0.0), time.time())
             if stop and state["recording"]:
-                log(f"hands-free: silence -> auto stop ({dec.describe()})")
+                why = "smart-turn" if smart else "silence"
+                log(f"hands-free: {why} -> auto stop ({dec.describe()})")
                 stop_rec()
                 return
             if time.time() - t_start >= hard_max:
@@ -3818,6 +4077,11 @@ def _start_core() -> None:
             # on later without a restart. Failure is logged and harmless.
             if str(config.get("autostop_engine", "vad")).lower() == "vad":
                 get_autostop_vad()
+                # Smart Turn after the VAD, for the same reason; get_smart_turn
+                # only starts a background load (first run: an 8 MB download)
+                # and returns at once, so boot is never held up by the network
+                if _vad_model is not None and smart_turn_enabled():
+                    get_smart_turn()
         except Exception as e:
             log(f"model load failed ({e.__class__.__name__}: {e}) — "
                 f"dictation unavailable")

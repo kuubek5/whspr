@@ -33,6 +33,10 @@ hiddenimports = ["comtypes", "pystray._win32", "cuda_setup", "webview_app",
 # lazily (Silero VAD); its DLLs must be in the bundle for either feature. If the
 # packages are missing at build time the try/except skips them and the build
 # simply ships without Parakeet (the app then falls back to Whisper).
+# Smart Turn (hands-free end-of-turn) needs nothing extra here: it runs on the
+# same onnxruntime, takes its log-mel from faster_whisper.feature_extractor
+# (pure numpy, covered by collect_all("faster_whisper")) and fetches its 8 MB
+# onnx at runtime via huggingface_hub into the models cache, not the bundle.
 for pkg in ("webview", "ctranslate2", "faster_whisper", "sounddevice",
             "tokenizers", "huggingface_hub", "av", "onnxruntime", "onnx_asr"):
     try:
