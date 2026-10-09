@@ -13,7 +13,8 @@ class Classify(unittest.TestCase):
         self.assertEqual(app_styles.classify("telegram.exe"), "chat")
         self.assertEqual(app_styles.classify("outlook.exe"), "email")
         self.assertEqual(app_styles.classify("code.exe"), "code")
-        self.assertEqual(app_styles.classify("claude.exe"), "code")
+        # Claude desktop is dictated to in prose, so it keeps the default polish
+        self.assertEqual(app_styles.classify("claude.exe"), "default")
 
     def test_case_insensitive(self):
         self.assertEqual(app_styles.classify("Telegram.EXE"), "chat")

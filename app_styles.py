@@ -57,13 +57,15 @@ BUILTIN_APP_STYLES = {
     # email / documents
     "outlook.exe": "email", "olk.exe": "email", "hxoutlook.exe": "email",
     "thunderbird.exe": "email", "winword.exe": "email",
-    # code / terminals / AI assistants
+    # code / terminals. Claude desktop (claude.exe) is deliberately NOT here:
+    # it is dictated to in plain sentences, and the conservative code style kept
+    # recognition errors ("викинано" for "виконано") that the default polish fixes.
     "code.exe": "code", "cursor.exe": "code", "windsurf.exe": "code",
     "windowsterminal.exe": "code", "wt.exe": "code", "openconsole.exe": "code",
     "conhost.exe": "code", "cmd.exe": "code", "powershell.exe": "code",
     "pwsh.exe": "code", "idea64.exe": "code", "pycharm64.exe": "code",
     "webstorm64.exe": "code", "devenv.exe": "code", "zed.exe": "code",
-    "claude.exe": "code", "wezterm-gui.exe": "code", "alacritty.exe": "code",
+    "wezterm-gui.exe": "code", "alacritty.exe": "code",
     "mintty.exe": "code",
 }
 
