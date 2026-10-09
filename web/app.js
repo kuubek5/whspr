@@ -54,6 +54,9 @@ const state = {
               llm: "off", groqKey: "", groqModel: "", ollamaModel: "",
               groqKeyVisible: false, spokenPunctuation: true, normalizeNumbers: true,
               voiceCommands: true, handsFree: false, llmPrompt: "", llmPromptDefault: "",
+              // per-app polish style: toggle is saved, appStyles is a read-only
+              // [{id, label, hint, apps, web}] list from app_styles.describe()
+              appStylesEnabled: true, appStyles: [],
               // ---- floating pill placement ----
               // overlayPosition is either one of the nine presets ("bottom-center")
               // or a free {x, y} in percent of the FREE space on each axis — exactly
@@ -88,6 +91,16 @@ const MOCK_MODELS = [
   { id: "tiny", label: "Tiny", size: "74 MB", note: "найшвидша, найгірша якість", installed: false, active: false, diskMb: 0 },
 ];
 
+// trimmed copy of what app_styles.describe() returns, for the browser preview
+const MOCK_APP_STYLES = [
+  { id: "chat", label: "Месенджери", hint: "Розмовно й коротко, без привітань і підписів",
+    apps: ["discord.exe", "signal.exe", "slack.exe", "telegram.exe", "viber.exe", "whatsapp.exe"],
+    web: ["telegram", "whatsapp", "discord", "slack"] },
+  { id: "email", label: "Пошта й документи", hint: "Акуратна пунктуація, охайний тон",
+    apps: ["outlook.exe", "thunderbird.exe", "winword.exe"], web: ["gmail", "outlook"] },
+  { id: "code", label: "Код і термінал", hint: "Без перефразування — лише збої й пунктуація",
+    apps: ["claude.exe", "cmd.exe", "code.exe", "cursor.exe", "pwsh.exe", "windowsterminal.exe"], web: [] },
+];
 function mock(method, args) {
   if (method === "list_models") return MOCK_MODELS;
   if (method === "activate_model") {
@@ -125,7 +138,7 @@ function mock(method, args) {
       { id: 2, day: "Вчора", time: "19:20", lang: "uk", duration: "2.4с", text: "нагадати купити фотополімер для друку" },
       { id: 1, day: "12 вересня", time: "16:05", lang: "en", duration: "3.0с", text: "schedule the standup for tomorrow morning" },
     ],
-    settings: state.settings,
+    settings: Object.assign({}, state.settings, { appStyles: MOCK_APP_STYLES }),
     devices: [{ name: "Мікрофон (Realtek Audio)" }, { name: "Вхід (XONAR SOUND CARD)" },
               { name: "OnePlus 9R Hands-Free" }],
     models: MOCK_MODELS,
@@ -881,6 +894,16 @@ function sttCloudHtml() {
       <span class="cloud-price">${p.free ? "Є безкоштовний ліміт · ціни у провайдера" : "Ціни у провайдера"}</span></div>
     <div class="note" id="sttVerifyNote" style="display:none;margin-top:2px"></div></div>`;
 }
+function appStylesListHtml() {
+  const list = state.settings.appStyles || [];
+  return list.map((c) => {
+    const apps = (c.apps || []).map((a) => a.replace(/\.exe$/i, ""));
+    const web = (c.web || []).length ? ` · у браузері: ${(c.web || []).join(", ")}` : "";
+    return `<div class="style-item"><div class="lab">${esc(c.label || c.id)}</div>
+      ${c.hint ? `<div class="hint">${esc(c.hint)}</div>` : ""}
+      <div class="apps mono">${esc(apps.join(", ") || "—")}${esc(web)}</div></div>`;
+  }).join("");
+}
 function toggleRow(label, hint, key, help) {
   const on = state.settings[key];
   return `<div class="srow"><div style="min-width:0">
@@ -972,6 +995,11 @@ function renderSettings(el) {
               <div class="hint">Що саме AI робить з розпізнаним текстом. Порожнє — типова інструкція</div></div>
             <button class="btn ghost" id="llmPromptReset" style="padding:8px 13px;font-size:12px">Скинути до типового</button></div>
           <textarea class="ta mono" id="llmPrompt" rows="5" placeholder="Типова інструкція" aria-label="Інструкція для полірування">${esc(s.llmPrompt || s.llmPromptDefault || "")}</textarea>
+        </div>
+        <div id="appStylesBlock" style="margin-top:15px;border-top:1px solid var(--line)">
+          ${toggleRow("Стиль під програму", "AI підлаштовує тон під вікно, куди йде текст. Інші програми — як зараз", "appStylesEnabled",
+            ["hlp-appstyles", "KuubWave дивиться, в яку програму вставляється текст, і додає до інструкції коротку підказку: у месенджері — розмовно, у пошті — акуратно, у коді й терміналі — нічого не перефразовувати. Ваша інструкція вище лишається основною."])}
+          <div class="style-list" id="appStylesList"${s.appStylesEnabled ? "" : " hidden"}>${appStylesListHtml()}</div>
         </div></div>`,
     license: `
       <div class="panel"><h2>Ліцензія</h2>
@@ -1121,6 +1149,8 @@ function bindAiPane(el) {
     // the corrector instruction applies to both providers, so show it whenever
     // polishing is on at all
     el.querySelector("#llmPromptBlock").style.display = s.llm === "off" ? "none" : "";
+    // the per-app style only shapes the polish prompt, so it goes with it
+    el.querySelector("#appStylesBlock").style.display = s.llm === "off" ? "none" : "";
     el.querySelectorAll(".seg [data-llm]").forEach((b) => {
       const on = b.dataset.llm === s.llm;
       b.classList.toggle("on", on);
@@ -1128,7 +1158,12 @@ function bindAiPane(el) {
     });
   };
   syncLlm();
-  const setLlm = (v) => { s.llm = v; syncLlm(); saveSettings(); };
+  // the shared toggle handler (renderSettings) saves; this only shows/hides the
+  // category list to match, without re-rendering the whole pane
+  const stTg = el.querySelector('.tg[data-key="appStylesEnabled"]');
+  const stSave = stTg.onclick;
+  stTg.onclick = () => { stSave(); el.querySelector("#appStylesList").hidden = !s.appStylesEnabled; };
+  const setLlm =(v) => { s.llm = v; syncLlm(); saveSettings(); };
   el.querySelectorAll(".seg [data-llm]").forEach((b) => b.onclick = () => {
     const v = b.dataset.llm;
     if (v === s.llm) return;

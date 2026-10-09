@@ -10,6 +10,7 @@ import threading
 import webview
 
 import flow
+import app_styles
 
 # frozen (PyInstaller) builds unpack bundled data under sys._MEIPASS
 BASE = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
@@ -100,6 +101,10 @@ class Api:
                 # the settings page can prefill it and offer a reset
                 "llmPrompt": c.get("llm_prompt", ""),
                 "llmPromptDefault": flow.LLM_PROMPT,
+                # per-app polish style: the toggle is saved; the category list
+                # is read-only display (user overrides live in config.json)
+                "appStylesEnabled": c.get("app_styles_enabled", True),
+                "appStyles": app_styles.describe(c),
             },
             "devices": flow.list_input_devices(),
             "models": flow.models_status(),
@@ -348,6 +353,9 @@ class Api:
         # its future improvements — keep applying; a real edit is stored verbatim
         prompt = (s.get("llmPrompt") or "").strip()
         c["llm_prompt"] = "" if prompt == flow.LLM_PROMPT.strip() else prompt
+        # read per take in _transcribe_impl, so no reload is needed. Missing key
+        # (an older UI payload) keeps the feature on, matching DEFAULTS.
+        c["app_styles_enabled"] = bool(s.get("appStylesEnabled", True))
         flow.save_config(c)
         flow.set_autostart(c["autostart"])
         # the pill bakes size and placement in when it is built, so it only

@@ -170,6 +170,7 @@ from faster_whisper import WhisperModel
 # them into this file would make them untestable without booting the audio
 # stack. PyInstaller needs it listed in packaging/kuubwave.spec.
 import text_fixes
+import app_styles
 
 # ---------------- Config ----------------
 APP_VERSION = "1.4.7"  # single source of truth; build.ps1 feeds it to Inno
@@ -328,6 +329,17 @@ DEFAULTS = {
     "ru_retry": True,
     # admin-editable corrector instruction (Settings). Empty = use LLM_PROMPT.
     "llm_prompt": "",
+    # Per-app writing style (see app_styles.py): the polish prompt gets a short
+    # extra instruction picked from the window the text is pasted into — casual
+    # for messengers, neat for mail, "don't rephrase" for code/terminals. Off, or
+    # an unknown app, means the plain prompt above, exactly as before.
+    "app_styles_enabled": True,
+    # {"some.exe": "chat" | "email" | "code" | "default" | <own category>} laid
+    # over the built-in table; empty = built-ins only. Config-file only for now.
+    "app_styles": {},
+    # {"chat": "...instruction..."} laid over the built-in style texts; "" turns
+    # that category's addition off. Config-file only for now.
+    "style_prompts": {},
     "groq_api_key": "",
     "groq_model": "openai/gpt-oss-20b",
     "ollama_model": "qwen2.5:7b",
@@ -869,7 +881,7 @@ def _llm_request(system_prompt: str, user_text: str, label: str) -> str | None:
         return None
 
 
-def llm_polish(text: str, lang: str) -> str:
+def llm_polish(text: str, lang: str, style: str | None = None) -> str:
     """Optional cleanup pass. Any failure returns the raw text.
 
     A short dictated imperative ("Так роби всі три") reads to the model as an
@@ -883,6 +895,9 @@ def llm_polish(text: str, lang: str) -> str:
     # the admin can tune the corrector from Settings without touching code; blank
     # falls back to the shipped default (and picks up its future improvements).
     prompt = (config.get("llm_prompt") or "").strip() or LLM_PROMPT
+    # the per-app style is APPENDED, so the core rules above — custom or
+    # shipped — still govern; None/"default" leaves the prompt untouched
+    prompt = app_styles.compose_prompt(prompt, style, config)
     out = _llm_request(prompt, text, "polish")
     if not out:
         return text
@@ -2170,7 +2185,7 @@ ASYNC_REWRITE_WINDOW_S = 15.0
 
 
 def _schedule_llm_polish(raw: str, lang: str, target_hwnd: int,
-                         row_id: int | None) -> None:
+                         row_id: int | None, style: str | None = None) -> None:
     """Polish an ALREADY-PASTED transcript in the background, then rewrite it.
 
     This is the whole point of llm_async: the measured cost of the polish call
@@ -2202,7 +2217,10 @@ def _schedule_llm_polish(raw: str, lang: str, target_hwnd: int,
     def work():
         # The network call happens OUTSIDE _transcribe_lock: holding it for up
         # to 15 s would stall the next dictation behind a slow Groq response.
-        polished = llm_polish(raw, lang)
+        # style is resolved once in _transcribe_impl (the target window may lose
+        # focus before this thread runs). Only passed when set, so a two-argument
+        # llm_polish stand-in (test_async_polish.py) keeps working.
+        polished = llm_polish(raw, lang, style) if style else llm_polish(raw, lang)
         if not polished or polished == raw:
             return
         if len(polished) > ASYNC_REWRITE_MAX_CHARS:
@@ -2482,8 +2500,17 @@ def _transcribe_impl(pre: list, cur: list, target_hwnd: int) -> None:
         # the LLM sees the fully normalised text instead, which is if anything
         # the friendlier input.
         polish_async = config.get("llm_async", True) and llm_available()
+        # Per-app style, resolved from the paste target once, here, for both the
+        # sync and async paths. Only looked up when a polish will actually run,
+        # and None for "default" so the call is exactly the pre-feature one.
+        style = None
+        if llm_available() and config.get("app_styles_enabled", True):
+            category, exe = app_styles.resolve_style(target_hwnd, config)
+            log(f"style: {category} ({exe or '?'})")
+            if category != app_styles.DEFAULT:
+                style = category
         if not polish_async:
-            text = llm_polish(text, lang)
+            text = llm_polish(text, lang, style) if style else llm_polish(text, lang)
         text = apply_replacements(text)
         text = capitalize_sentences(text)
         row_id = history_add(text, lang, dur)
@@ -2495,7 +2522,7 @@ def _transcribe_impl(pre: list, cur: list, target_hwnd: int) -> None:
         if pasted:
             state["last_output"] = {"text": text, "hwnd": target_hwnd, "at": time.time()}
             if polish_async:
-                _schedule_llm_polish(text, lang, target_hwnd, row_id)
+                _schedule_llm_polish(text, lang, target_hwnd, row_id, style)
     finally:
         set_status("idle")
         if overlay is not None and config.get("overlay", True):
