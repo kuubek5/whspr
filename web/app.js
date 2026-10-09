@@ -1113,14 +1113,14 @@ function styleMetaText() {
 }
 function styleProfileHtml() {
   const s = state.settings, p = s.styleProfile || {};
-  return `<div id="styleProfileBlock" style="margin-top:15px;border-top:1px solid var(--line)">
+  return `<div id="styleProfileBlock" class="sep gt">
     ${toggleRow("Мій стиль письма", "AI зберігає ваші звички — «ти» чи «ви», довжину речень, терміни латиницею. Експериментально: різниця невелика, трохи більше токенів на кожну диктовку", "styleProfileEnabled",
       ["hlp-styleprofile", "KuubWave рахує на цьому комп'ютері кілька загальних звичок із вашої історії диктовок і додає їх до інструкції як короткі правила. Самі тексти, імена чи цифри з історії нікуди не йдуть і в правила не потрапляють. Оновлюється сам раз на тиждень."])}
     <div class="sp-wrap" id="spWrap"${s.styleProfileEnabled ? "" : " hidden"}>
       <div class="trait-list" id="spTraits">${styleTraitsHtml()}</div>
-      <div class="note ok" style="margin-top:8px">${svg(ICON.shield, 15)}<span>Профіль рахується на цьому комп'ютері; у хмару йдуть лише ці загальні правила, не ваші тексти</span></div>
+      <div class="note ok gt">${svg(ICON.shield, 15)}<span>Профіль рахується на цьому комп'ютері; у хмару йдуть лише ці загальні правила, не ваші тексти</span></div>
       <div class="sp-foot"><span class="sp-meta" id="spMeta">${styleMetaText()}</span>
-        <button class="btn ghost" id="spRebuild" style="padding:8px 13px;font-size:12px">Оновити профіль</button></div>
+        <button class="btn ghost sm" id="spRebuild">Оновити профіль</button></div>
       <details class="sp-text" id="spTextBox"${p.text ? "" : " hidden"}><summary>Що саме отримує AI</summary>
         <pre id="spText">${esc(p.text || "")}</pre></details>
     </div></div>`;

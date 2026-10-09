@@ -68,13 +68,21 @@ class ProfileHook(unittest.TestCase):
     def setUp(self):
         self._log = flow.log
         flow.log = lambda *a, **k: None
+        # flow ships a real style_profile_prompt now; these tests swap it in
+        # and out, so keep the original and put it back — deleting it would
+        # break every later test that polishes text
+        self._orig_hook = vars(flow).get("style_profile_prompt")
 
     def tearDown(self):
         flow.log = self._log
-        if "style_profile_prompt" in vars(flow):
+        if self._orig_hook is not None:
+            flow.style_profile_prompt = self._orig_hook
+        elif "style_profile_prompt" in vars(flow):
             del flow.style_profile_prompt
 
     def test_absent_hook(self):
+        if "style_profile_prompt" in vars(flow):
+            del flow.style_profile_prompt
         self.assertEqual(flow._style_profile_text(), "")
 
     def test_present_hook(self):
@@ -219,11 +227,15 @@ class RunScribe(unittest.TestCase):
         self.assertIn("З повагою", self.calls[0][0])
 
     def test_profile_hook_reaches_prompt(self):
+        orig = vars(flow).get("style_profile_prompt")
         flow.style_profile_prompt = lambda cfg: "Пише без знаків оклику."
         try:
             self.run_cmd()
         finally:
-            del flow.style_profile_prompt
+            if orig is not None:
+                flow.style_profile_prompt = orig
+            else:
+                del flow.style_profile_prompt
         self.assertIn("Пише без знаків оклику.", self.calls[0][0])
 
     def test_selection_still_rewrites(self):
