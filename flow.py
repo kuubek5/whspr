@@ -316,6 +316,12 @@ DEFAULTS = {
         "новий абзац": "\n\n",
         "new paragraph": "\n\n",
     },
+    # Snippets: say the WHOLE trigger phrase ("мій підпис") and the stored block
+    # is pasted verbatim — multi-line, no LLM/normalisation/replacements. Unlike
+    # "replacements" above, which rewrite words INSIDE a sentence, a snippet only
+    # fires when the take is nothing but the trigger. See try_snippet().
+    "snippets": {},
+    "snippets_enabled": True,
     # turn dictated "кома"/"крапка"/"знак питання" into , . ?
     "spoken_punctuation": True,
     # fold spoken number words into digits: "триста п'ятдесят два" -> "352"
@@ -2406,6 +2412,40 @@ def match_voice_command(transcript: str):
     return _voice_lookup.get(_norm_cmd(transcript))
 
 
+def match_snippet(text: str):
+    """(trigger, body) if this whole take is a saved snippet trigger, else None.
+
+    Precedence against voice commands: a snippet trigger the user typed in
+    EXACTLY wins over a built-in command with the same words — it is their own,
+    deliberate choice. But the fuzzy fallback is switched off whenever the take
+    is a built-in voice command, so a near-miss snippet can never steal
+    "видали це" or "капсом"."""
+    if not config.get("snippets_enabled", True):
+        return None
+    snippets = config.get("snippets") or {}
+    if not snippets:
+        return None
+    fuzzy = match_voice_command(text) is None
+    return text_fixes.match_snippet(text, snippets, fuzzy=fuzzy)
+
+
+def run_snippet(trigger: str, body: str, lang: str, dur: float,
+                target_hwnd: int) -> tuple[str, bool]:
+    """Paste a snippet body exactly as stored. Every text pass (numbers, spoken
+    punctuation, LLM, replacements, capitalisation, per-app style) is skipped on
+    purpose: the user wrote this block by hand and wants it byte for byte."""
+    log(f"snippet: {trigger!r} ({len(body)} chars)")
+    history_add(body, lang, dur)
+    pasted = paste_text(body, target_hwnd)
+    state["pill_text"] = body
+    state["pill_done_at"] = time.time()
+    if not pasted:
+        return "фокус втрачено — текст у буфері", False
+    # so "видали це" / "капсом" can act on the snippet like on any dictation
+    state["last_output"] = {"text": body, "hwnd": target_hwnd, "at": time.time()}
+    return body, True
+
+
 def _send_backspaces(n: int) -> None:
     bs = keyboard.Key.backspace
     for _ in range(n):
@@ -3243,6 +3283,16 @@ def _transcribe_impl(pre: list, cur: list, target_hwnd: int,
         # backspaces over the user's text, and acting on a command the model was
         # unsure it heard is worse than making the user repeat it. Moving this
         # check after the command match would trade that safety for convenience.
+        # Snippets come first among the whole-utterance matches (the command
+        # branch above has already returned, so a command-mode instruction can
+        # never paste a snippet). Precedence is documented in match_snippet: an
+        # exact user trigger beats a built-in voice command, a fuzzy one never
+        # does. Like voice commands, a short trigger decoded with low confidence
+        # was already dropped by the hallucination filter above.
+        snip = match_snippet(text)
+        if snip:
+            done_msg, ok = run_snippet(snip[0], snip[1], lang, dur, target_hwnd)
+            return
         # a whole-utterance command edits the previous dictation instead of
         # typing new text; checked before normalization so triggers match cleanly
         cmd = match_voice_command(text)

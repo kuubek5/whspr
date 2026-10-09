@@ -132,6 +132,10 @@ class Api:
                 "hotwords": c.get("dictionary", ""),
                 "commands": [{"phrase": k, "result": v}
                              for k, v in c.get("replacements", {}).items()],
+                # whole-utterance trigger -> stored block (flow.match_snippet)
+                "snippets": [{"trigger": k, "text": v}
+                             for k, v in (c.get("snippets") or {}).items()],
+                "snippetsEnabled": c.get("snippets_enabled", True),
             },
         }
 
@@ -439,6 +443,25 @@ class Api:
         c["dictionary"] = hotwords or ""
         c["replacements"] = {cm["phrase"]: cm["result"]
                              for cm in commands if cm.get("phrase")}
+        flow.save_config(c)
+        return True
+
+    def save_snippets(self, items, enabled=None):
+        """A separate method rather than a third save_dictionary argument, so
+        an older UI calling save_dictionary(hotwords, commands) keeps working
+        and can never wipe snippets it does not know about. Rows with an empty
+        trigger or empty text are dropped; the text is stored untouched
+        (newlines and edge spaces included) because it is pasted verbatim."""
+        c = flow.config
+        out = {}
+        for it in items or []:
+            trig = str((it or {}).get("trigger") or "").strip()
+            text = str((it or {}).get("text") or "")
+            if trig and text.strip():
+                out[trig] = text.replace("\r\n", "\n")
+        c["snippets"] = out
+        if enabled is not None:
+            c["snippets_enabled"] = bool(enabled)
         flow.save_config(c)
         return True
 
