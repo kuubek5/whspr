@@ -180,7 +180,7 @@ import style_profile
 import latency
 
 # ---------------- Config ----------------
-APP_VERSION = "1.4.11"  # single source of truth; build.ps1 feeds it to Inno
+APP_VERSION = "1.4.12"  # single source of truth; build.ps1 feeds it to Inno
 GITHUB_REPO = "kuubek5/kuubwave"  # public releases-only repo the updater polls
 # Cloudflare (in front of Groq) 403s urllib's default agent — send a browser one
 HTTP_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
