@@ -24,7 +24,8 @@ hiddenimports = ["comtypes", "pystray._win32", "cuda_setup", "webview_app",
                  # lose the "raise the mic level" button. Both listed explicitly.
                  # term_suggest is imported lazily by webview_app for the same
                  # reason ("Знайти проблемні слова").
-                 "text_fixes", "mic_level", "app_styles", "term_suggest"]
+                 "text_fixes", "mic_level", "app_styles", "term_suggest",
+                 "latency"]
 
 # pull in data files / dylibs / submodules for the tricky native packages.
 # onnx_asr + onnxruntime are for the optional Parakeet engine: flow.py imports

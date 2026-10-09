@@ -613,6 +613,72 @@ def polish_is_safe(raw: str, polished: str) -> bool:
     return True
 
 
+# Words the polish prompt is told to strip ("ем, еее, ну от, um, uh"). A short
+# take that contains one still goes to the LLM: removing it is real work the
+# deterministic passes cannot do. "е" is not a Ukrainian word ("є" is), so a
+# lone "е" can only be a hesitation.
+_POLISH_FILLERS = frozenset({
+    "е", "ее", "еее", "ем", "еем", "емм", "м", "мм", "ммм", "ну", "от",
+    "э", "эм", "um", "uh", "uhm", "erm", "hmm", "mm",
+})
+_POLISH_TERMINAL = ".!?…"
+# A short take that OPENS with one of these is where the corrector still had
+# work in the measured sample: a question word ending in "." ("Що скажеш." ->
+# "Що скажеш?"), or an opener that wants a comma after it ("Так застосовую."
+# -> "Так, застосовую."). Such takes keep the LLM.
+_POLISH_QUESTION_OPENERS = frozenset({
+    "що", "як", "чому", "де", "коли", "хто", "чи", "який", "яка", "яке", "які",
+    "куди", "звідки", "скільки", "навіщо", "нащо", "хіба", "невже", "чого",
+    "what", "how", "why", "where", "when", "who", "which", "is", "are", "do",
+    "does", "can", "should",
+})
+_POLISH_COMMA_OPENERS = frozenset({
+    "так", "ні", "добре", "ок", "окей", "гаразд", "ага", "угу", "слухай",
+    "слухайте", "дивись", "дивіться", "чекай", "стоп", "а", "і", "але", "ой",
+    "yes", "no", "ok", "okay", "well", "so",
+})
+
+
+def polish_skip_reason(text: str, max_words: int) -> str | None:
+    """Why the LLM polish can be skipped for `text`, or None to run it.
+
+    Measured on the user's real takes (see the polish_skip_short note in flow's
+    DEFAULTS): on a few-word take that Whisper already punctuated, the corrector
+    returns the same text — after flow's own capitalize_sentences the result is
+    byte-identical — yet the round trip still costs 0.3-1.4 s. Every condition
+    below is a case where the LLM DID have something to do, kept on the LLM path:
+
+      * more than `max_words` words (commas, clause breaks, misheard words);
+      * no final . ! ? … — the LLM would add the end punctuation;
+      * a filler word it is told to delete;
+      * a question word ending in "." or an opener with no comma after it
+        (_POLISH_QUESTION_OPENERS / _POLISH_COMMA_OPENERS);
+      * Russian drift it might repair.
+
+    Capitalisation is NOT a reason to call it: capitalize_sentences runs on
+    every take after the polish anyway. max_words <= 0 disables skipping."""
+    if max_words <= 0:
+        return None
+    s = (text or "").strip()
+    if not s or s[-1] not in _POLISH_TERMINAL:
+        return None
+    words = [_fold(t) for t in _TOKEN_RE.findall(s) if _IS_WORD.match(t)]
+    if not words or len(words) > max_words:
+        return None
+    if any(w in _POLISH_FILLERS for w in words):
+        return None
+    if words[0] in _POLISH_QUESTION_OPENERS and s[-1] != "?":
+        return None
+    if len(words) > 1 and words[0] in _POLISH_COMMA_OPENERS:
+        # already followed by its punctuation ("Так, давай.") = nothing to add
+        m = re.match(r"\W*[^\W_]+(?:[" + _APOS + r"][^\W_]+)*\s*([,.!?…:;—–-]?)", s)
+        if not (m and m.group(1)):
+            return None
+    if looks_russian(s):
+        return None
+    return f"short take ({len(words)} word{'s' if len(words) != 1 else ''}, already punctuated)"
+
+
 # ------------------------------------------------------------- 6. snippets
 
 # Words that may precede a snippet trigger: "вставити мій підпис" reads more

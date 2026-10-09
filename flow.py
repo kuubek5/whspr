@@ -22,7 +22,10 @@ import wave
 import uuid
 import subprocess
 import urllib.error
+import urllib.parse
 import urllib.request
+import http.client
+import ssl
 
 BASE = os.path.dirname(os.path.abspath(__file__))
 FROZEN = getattr(sys, "frozen", False)
@@ -171,6 +174,8 @@ from faster_whisper import WhisperModel
 # stack. PyInstaller needs it listed in packaging/kuubwave.spec.
 import text_fixes
 import app_styles
+# per-take stage timing (pure, stdlib); one "latency:" log line per pasted take
+import latency
 
 # ---------------- Config ----------------
 APP_VERSION = "1.4.10"  # single source of truth; build.ps1 feeds it to Inno
@@ -410,6 +415,34 @@ DEFAULTS = {
     "style_prompts": {},
     "groq_api_key": "",
     "groq_model": "openai/gpt-oss-20b",
+    # gpt-oss is a reasoning model: at Groq's default ("medium") it spent ~220
+    # hidden reasoning tokens per polish of a one-line dictation. Benchmarked on
+    # 80 of the user's real raw transcripts (2026-10-09, same prompt, fresh
+    # connection per call): default p50 0.54 s / p90 1.10 s, "low" p50 0.42 s /
+    # p90 0.68 s with ~85 tokens. Same words as the default on 77/80; the
+    # differences went both ways (low fixed two misheard words the default
+    # left, the default once reordered words, which the prompt forbids) and no
+    # guard trip or Russian in either. For scale: run twice, the default
+    # disagreed with ITSELF on 9 of 40 long takes (low: 12 of 40), so the
+    # low-vs-default gap is run-to-run noise. A rerun of those 40 confirmed
+    # the speed: p50 0.65 -> 0.47 s, p90 1.23 -> 0.76 s. Fewer tokens also
+    # stretch the free tier's 8000 tokens/min. Faster models on Groq rejected:
+    # qwen3.8-27b (p50 0.20 s) changed word forms on 11/80 takes ("берем" ->
+    # "беремо", "в" -> "у"), gpt-oss-120b was slower and changed more. Sent
+    # only to openai/gpt-oss-* (see _groq_reasoning_effort); "" = Groq default.
+    "groq_reasoning_effort": "low",
+    # Skip the LLM for a short take Whisper already punctuated (rule and its
+    # exceptions: text_fixes.polish_skip_reason). Measured 2026-10-09 on 180
+    # of the user's real takes run through the polish: of the 78 the rule
+    # skips at 3 words, the LLM changed 2 — one misheard name left equally
+    # garbled, one real fix ("Продолжуємо" -> "Продовжуємо"); the rest came back
+    # identical after capitalize_sentences. That is ~18% of all takes (274 of
+    # 1562 in the log) saving the whole 0.3-0.7 s round trip. At 4 words the
+    # LLM still changed 5 of 103 (commas, a "?"), at 5 words 9 of 127, so 3 is
+    # where it stops being free. Note the opener exceptions were derived from
+    # that same sample. 0 / False = always polish, as before.
+    "polish_skip_short": True,
+    "polish_skip_max_words": 3,
     "ollama_model": "qwen2.5:7b",
     # --- recognition backend (BYOK cloud STT) ---
     # "local" = on-device Whisper (default); "cloud" = a provider's STT API.
@@ -559,8 +592,18 @@ _flush_early_log()
 
 # Groq models that have been decommissioned: a saved config still pointing at
 # one 404s on every request. Swap them for the current default on load.
+# The second line was checked against Groq's live /models list on 2026-10-09:
+# the only chat models left are gpt-oss-20b/120b, qwen3.8-27b and allam-2-7b,
+# so a config saved with any once-popular pick below now gets a 404 — i.e. no
+# polish at all, silently, plus a 60 s back-off after every take.
 RETIRED_GROQ_MODELS = {"llama-3.3-70b-versatile", "llama-3.1-70b-versatile",
-                       "mixtral-8x7b-32768", "llama3-70b-8192"}
+                       "mixtral-8x7b-32768", "llama3-70b-8192",
+                       "llama-3.1-8b-instant", "llama3-8b-8192", "gemma2-9b-it",
+                       "qwen/qwen3-32b", "qwen-qwq-32b",
+                       "deepseek-r1-distill-llama-70b",
+                       "meta-llama/llama-4-scout-17b-16e-instruct",
+                       "meta-llama/llama-4-maverick-17b-128e-instruct",
+                       "moonshotai/kimi-k2-instruct"}
 
 
 def load_config() -> dict:
@@ -906,6 +949,152 @@ def llm_available() -> bool:
     return mode == "ollama"
 
 
+# Kept-alive HTTP(S) connections for the LLM call, one parked per host.
+# urlopen() builds a new TCP + TLS session for every request; to api.groq.com
+# that measured ~60 ms of a ~0.26 s round trip on this machine (GET /models,
+# fresh vs reused, 15 alternating pairs), paid on EVERY polish. Groq kept an
+# idle connection open for at least 90 s, so back-to-back dictations reuse it,
+# and _llm_prewarm opens one while the user is still talking so even the first
+# take after a long idle skips the handshake.
+#
+# A connection is checked OUT of the pool for the duration of a request, so two
+# threads (sync polish + an async rewrite, command mode) never share a socket:
+# the second simply opens its own, and only one is parked afterwards.
+_http_pool: dict[tuple[str, str], tuple["http.client.HTTPConnection", float]] = {}
+_http_pool_lock = threading.Lock()
+# Past this idle time a parked connection is presumed dead (servers and NATs
+# drop idle TCP silently) and replaced up front rather than discovered stale.
+_HTTP_IDLE_MAX_S = 60.0
+# Errors that mean "the kept-alive socket was already closed by the other end"
+# — raised before any response, so the request never ran and one retry on a
+# fresh connection is safe.
+_HTTP_STALE = (http.client.RemoteDisconnected, http.client.CannotSendRequest,
+               ConnectionError, ssl.SSLEOFError)
+
+
+def _http_new(scheme: str, netloc: str, timeout: float):
+    cls = http.client.HTTPSConnection if scheme == "https" else http.client.HTTPConnection
+    return cls(netloc, timeout=timeout)
+
+
+def _http_take(scheme: str, netloc: str, timeout: float):
+    """(connection, reused?) — a parked one if still fresh, else a new one."""
+    with _http_pool_lock:
+        conn, last = _http_pool.pop((scheme, netloc), (None, 0.0))
+    if conn is not None:
+        if time.monotonic() - last <= _HTTP_IDLE_MAX_S:
+            conn.timeout = timeout
+            if conn.sock is not None:
+                conn.sock.settimeout(timeout)
+            return conn, True
+        conn.close()
+    return _http_new(scheme, netloc, timeout), False
+
+
+def _http_park(scheme: str, netloc: str, conn) -> None:
+    with _http_pool_lock:
+        old = _http_pool.get((scheme, netloc))
+        _http_pool[(scheme, netloc)] = (conn, time.monotonic())
+    if old is not None and old[0] is not conn:
+        old[0].close()
+
+
+def _http_post_json(url: str, payload: dict, headers: dict, timeout: float) -> dict:
+    """POST JSON, return the parsed JSON reply, over a kept-alive connection.
+
+    Behaves like the urlopen() it replaces for every caller-visible outcome:
+    a 4xx/5xx raises urllib.error.HTTPError (same .code), a network failure
+    raises OSError/HTTPException, so _llm_request's except-all and back-off
+    are unchanged. If a system/env HTTPS proxy is configured, falls back to
+    urlopen outright: http.client does not honour proxies and a dictation that
+    silently stops polishing behind a corporate proxy is worse than 60 ms."""
+    body = json.dumps(payload).encode("utf-8")
+    u = urllib.parse.urlsplit(url)
+    if urllib.request.getproxies().get(u.scheme):
+        req = urllib.request.Request(url, body, headers=headers)
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.load(resp)
+    path = u.path + (f"?{u.query}" if u.query else "")
+    for attempt in (0, 1):
+        conn, reused = _http_take(u.scheme, u.netloc, timeout)
+        try:
+            conn.request("POST", path, body, headers)
+            resp = conn.getresponse()
+            data = resp.read()
+        except _HTTP_STALE:
+            conn.close()
+            if reused and attempt == 0:
+                continue  # parked socket was dead; the request never ran
+            raise
+        except BaseException:
+            conn.close()
+            raise
+        if resp.will_close or resp.status >= 400:
+            # an error reply may come with the server about to hang up; never
+            # park a connection we are not sure about
+            conn.close()
+        else:
+            _http_park(u.scheme, u.netloc, conn)
+        if resp.status >= 400:
+            raise urllib.error.HTTPError(url, resp.status, resp.reason,
+                                         resp.headers, io.BytesIO(data))
+        return json.loads(data)
+    raise ConnectionError("unreachable")  # loop always returns or raises
+
+
+def _llm_prewarm() -> None:
+    """Open the Groq connection in the background while the user is still
+    talking (called from start_rec), so the polish request after the take goes
+    straight out on an established TLS session. No-op unless Groq polish is on
+    and no fresh connection is already parked. Never raises, never logs the
+    key — it sends no request at all, only the TCP/TLS handshake. Everything,
+    the checks included, runs on its own thread: the caller is the hotkey
+    listener, which must never wait on a registry read or a DNS lookup."""
+    def work():
+        try:
+            if config.get("llm") != "groq" or not groq_key():
+                return
+            if urllib.request.getproxies().get("https"):
+                return  # _http_post_json uses urlopen then; nothing to warm
+            key = ("https", "api.groq.com")
+            with _http_pool_lock:
+                parked = _http_pool.get(key)
+            if parked is not None and time.monotonic() - parked[1] <= _HTTP_IDLE_MAX_S:
+                return
+            conn = _http_new(*key, 15)
+            conn.connect()
+            _http_park(*key, conn)
+        except Exception:
+            pass  # the real request just opens its own, as before
+    threading.Thread(target=work, daemon=True).start()
+
+
+def _llm_label() -> str:
+    """'groq:<model>[/<effort>]' or 'ollama:<model>' for the latency line —
+    provider and model only, never the key or any text."""
+    mode = config.get("llm", "off")
+    if mode == "groq":
+        model = config.get("groq_model", DEFAULTS["groq_model"])
+        effort = _groq_reasoning_effort(model)
+        return f"groq:{model}" + (f"/{effort}" if effort else "")
+    if mode == "ollama":
+        return f"ollama:{config.get('ollama_model', DEFAULTS['ollama_model'])}"
+    return mode
+
+
+def _groq_reasoning_effort(model: str) -> str | None:
+    """reasoning_effort to send with a Groq polish request, or None to send
+    none. Only the gpt-oss family is known to accept the field; sending it to a
+    model that does not is a 400, i.e. a polish that silently never happens plus
+    a 60 s back-off — so any other model gets the plain request."""
+    # str(): a hand-edited config.json can hold anything, and _llm_label calls
+    # this outside any try on the dictation path
+    effort = str(config.get("groq_reasoning_effort") or "").strip().lower()
+    if effort in ("low", "medium", "high") and str(model).startswith("openai/gpt-oss"):
+        return effort
+    return None
+
+
 def _llm_request(system_prompt: str, user_text: str, label: str) -> str | None:
     """One chat call to the configured provider. Returns the reply, or None on
     any failure (with a shared back-off so an unreachable provider doesn't add a
@@ -937,11 +1126,15 @@ def _llm_request(system_prompt: str, user_text: str, label: str) -> str | None:
         payload = {"model": model, "temperature": 0.2, "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_text}]}
-        req = urllib.request.Request(
-            url, json.dumps(payload).encode("utf-8"), headers=headers)
+        # polish only: command mode and the voice rewrite follow free-form
+        # instructions, where the extra thinking is worth its time
+        effort = (_groq_reasoning_effort(model)
+                  if mode == "groq" and label == "polish" else None)
+        if effort:
+            payload["reasoning_effort"] = effort
         t0 = time.time()
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            out = json.load(resp)["choices"][0]["message"]["content"].strip()
+        reply = _http_post_json(url, payload, headers, timeout=15)
+        out = (reply["choices"][0]["message"].get("content") or "").strip()
         log(f"llm {label} ({mode}): {time.time() - t0:.2f}s")
         state["llm_down_until"] = 0
         return out or None
@@ -2087,6 +2280,11 @@ class RmsAutoStop:
             self.silent_since = None
         return False
 
+    def silence_ago(self, recorded_s: float, now: float) -> float | None:
+        """Seconds of silence already behind the user when the take stopped —
+        the latency trace's "wait" stage. Wall clock, like silent_since here."""
+        return None if self.silent_since is None else max(0.0, now - self.silent_since)
+
     def describe(self) -> str:
         sil = 0 if self.silent_since is None else self.now - self.silent_since
         return (f"engine=rms peak={self.peak:.4f} floor={self.floor:.4f} "
@@ -2125,6 +2323,17 @@ class VadAutoStop:
 
     def silence_s(self) -> float:
         return 0.0 if self.silent_since is None else self.t - self.silent_since
+
+    def silence_ago(self, recorded_s: float, now: float) -> float | None:
+        """Seconds between the real end of speech and the end of the recording,
+        for the latency trace. Measured on the AUDIO clock (silent_since is
+        seconds into the take, recorded_s is the detached take's length), not as
+        silence_s(): the poll returns at the frame that crossed the gap, and the
+        audio already recorded past it — plus the up-to-100 ms poll delay — is
+        wait the user sat through too."""
+        if self.silent_since is None:
+            return None
+        return max(0.0, recorded_s - self.silent_since)
 
     def feed(self, prob: float, t: float) -> bool:
         self.last_prob, self.t = prob, t
@@ -3106,7 +3315,7 @@ def _overlay_flash(msg: str, ok: bool) -> None:
 
 
 def transcribe_and_paste(pre: list, cur: list, target_hwnd: int,
-                         command: bool = False) -> None:
+                         command: bool = False, trace=None) -> None:
     """Transcribe an ALREADY DETACHED take. The caller owns the detaching: it
     must call take_audio() on the thread that stops the recording, not here.
     Doing it here left a window where the user could press the hotkey again
@@ -3128,7 +3337,7 @@ def transcribe_and_paste(pre: list, cur: list, target_hwnd: int,
         set_status("idle")
         return
     with _transcribe_lock:
-        _transcribe_impl(pre, cur, target_hwnd, command)
+        _transcribe_impl(pre, cur, target_hwnd, command, trace)
 
 
 # Remembers the dictionary string we last warned about, so the "very short
@@ -3351,11 +3560,16 @@ def _schedule_llm_polish(raw: str, lang: str, target_hwnd: int,
 
 
 def _transcribe_impl(pre: list, cur: list, target_hwnd: int,
-                     command: bool = False) -> None:
+                     command: bool = False, trace=None) -> None:
     """`command` marks a command-mode take: the transcript is an instruction for
     run_selection_command and is never pasted. It goes through the same
     silence/hallucination filters first, so a misheard or empty instruction
-    aborts before the user's selection or clipboard is ever touched."""
+    aborts before the user's selection or clipboard is ever touched.
+
+    `trace` is the take's latency.Trace from stop_rec (None from tests and any
+    other caller: a fresh one is made, it just has no wait/queue stages)."""
+    if trace is None:
+        trace = latency.Trace()
     set_status("processing")
     done_msg, ok = None, True
     try:
@@ -3409,6 +3623,7 @@ def _transcribe_impl(pre: list, cur: list, target_hwnd: int,
             # loud enough to need no boost at all — clear any earlier warning
             state["mic_too_quiet"] = False
         # --- recognition backend: cloud (BYOK) or local (default) ---
+        trace.mark("stt_start")
         text = None
         avg_logprob = no_speech_prob = 0.0
         lang = LANGUAGES[state["lang"]]
@@ -3570,6 +3785,7 @@ def _transcribe_impl(pre: list, cur: list, target_hwnd: int,
                 else:
                     text, avg_logprob, no_speech_prob = pk_text, 0.0, 0.0
                     log("keeping parakeet output")
+        trace.mark("stt_end")
         if not text:
             # also the normal outcome when vad_filter is on and Silero judged the
             # whole clip non-speech: `segments` is then empty and there is
@@ -3640,22 +3856,51 @@ def _transcribe_impl(pre: list, cur: list, target_hwnd: int,
         # _schedule_llm_polish rewrite it in place once the network answers — so
         # the LLM sees the fully normalised text instead, which is if anything
         # the friendlier input.
-        polish_async = config.get("llm_async", True) and llm_available()
+        use_llm = llm_available()
+        # A few-word take Whisper already punctuated comes back from the LLM
+        # unchanged (see polish_skip_short in DEFAULTS), so skip the round trip;
+        # the deterministic passes above and capitalize_sentences below still
+        # run. Applies to the async path too: no pointless rewrite either.
+        skip = None
+        if use_llm and config.get("polish_skip_short", True):
+            try:
+                max_w = int(config.get("polish_skip_max_words",
+                                       DEFAULTS["polish_skip_max_words"]))
+            except (TypeError, ValueError):
+                max_w = DEFAULTS["polish_skip_max_words"]
+            skip = text_fixes.polish_skip_reason(text, max_w)
+            if skip:
+                log(f"polish skipped: {skip}")
+                use_llm = False
+        polish_async = config.get("llm_async", True) and use_llm
         # Per-app style, resolved from the paste target once, here, for both the
         # sync and async paths. Only looked up when a polish will actually run,
         # and None for "default" so the call is exactly the pre-feature one.
         style = None
-        if llm_available() and config.get("app_styles_enabled", True):
+        if use_llm and config.get("app_styles_enabled", True):
             category, exe = app_styles.resolve_style(target_hwnd, config)
             log(f"style: {category} ({exe or '?'})")
             if category != app_styles.DEFAULT:
                 style = category
-        if not polish_async:
+        trace.mark("polish_start")
+        if skip:
+            trace.polish_label = "skipped"
+        elif not use_llm:
+            trace.polish_label = "off"
+        elif polish_async:
+            trace.polish_label = "async"
+        else:
+            trace.polish_label = _llm_label()
             text = llm_polish(text, lang, style) if style else llm_polish(text, lang)
+        trace.mark("polish_end")
         text = apply_replacements(text)
         text = capitalize_sentences(text)
         row_id = history_add(text, lang, dur)
         pasted = paste_text(text, target_hwnd)
+        trace.mark("paste")
+        line = trace.summary()  # None on any trace trouble; never raises
+        if line:
+            log(line)
         done_msg, ok = (text, True) if pasted else ("фокус втрачено — текст у буфері", False)
         state["pill_text"] = text
         state["pill_done_at"] = time.time()
@@ -3776,11 +4021,18 @@ def start_listener() -> "_Listeners":
         duck_others(True)
         set_status("recording")
         log("recording...")
+        # TLS handshake to the LLM while the user talks, not after (see
+        # _http_pool); background thread, no request sent, no-op without Groq
+        _llm_prewarm()
 
-    def stop_rec():
+    def stop_rec(dec=None):
+        """`dec` = the hands-free auto-stop decider when IT ended the take, so
+        the latency trace can start at the real end of speech instead of at the
+        stop. Push-to-talk and manual taps pass nothing: release is the end."""
         if not state["recording"]:
             return
         state["recording"] = False
+        trace = latency.Trace()
         # restore playback now: no reason to keep other apps silent through
         # transcription, which runs on its own thread below
         duck_others(False)
@@ -3791,6 +4043,14 @@ def start_listener() -> "_Listeners":
         # start_rec() would clear `chunks` (destroying THIS take) and the worker
         # would then wake up and steal the next take's half-recorded audio.
         pre, cur = take_audio()
+        ago = None
+        if dec is not None:
+            try:
+                ago = dec.silence_ago(sum(len(c) for c in cur) / SAMPLE_RATE,
+                                      time.time())
+            except Exception:
+                ago = None  # timing is diagnostics; never cost the take
+        trace.stopped(ago)
         command = state.get("take_kind") == "command"
         state["take_kind"] = "dictate"
         # a command edits the window whose selection was there when the key
@@ -3802,7 +4062,7 @@ def start_listener() -> "_Listeners":
         else:
             hwnd = dictation_paste_target(start_hwnd)
         threading.Thread(target=transcribe_and_paste,
-                         args=(pre, cur, hwnd, command), daemon=True).start()
+                         args=(pre, cur, hwnd, command, trace), daemon=True).start()
         if config.get("mic_on_demand"):
             close_stream()
 
@@ -3842,7 +4102,7 @@ def start_listener() -> "_Listeners":
             if stop and state["recording"]:
                 why = "smart-turn" if smart else "silence"
                 log(f"hands-free: {why} -> auto stop ({dec.describe()})")
-                stop_rec()
+                stop_rec(dec)
                 return
             if time.time() - t_start >= hard_max:
                 log(f"hands-free: {hard_max}s cap -> auto stop ({dec.describe()})")
