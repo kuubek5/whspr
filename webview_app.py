@@ -102,6 +102,8 @@ class Api:
                 "normalizeNumbers": c.get("normalize_numbers", True),
                 "voiceCommands": c.get("voice_commands", True),
                 "handsFree": c.get("hands_free", False),
+                # semantic end-of-turn on top of the VAD auto-stop (hands-free)
+                "smartTurn": c.get("smart_turn", True),
                 "commandMode": c.get("command_mode_enabled", True),
                 "llm": c.get("llm", "off"),
                 "groqKey": c.get("groq_api_key", ""),
@@ -363,6 +365,13 @@ class Api:
         c["normalize_numbers"] = bool(s.get("normalizeNumbers"))
         c["voice_commands"] = bool(s.get("voiceCommands"))
         c["hands_free"] = bool(s.get("handsFree"))
+        # Smart Turn is read when each hands-free take starts, so no restart.
+        # A payload without the key (an older cached page) keeps the current
+        # value. Turning it on starts the background load/download now, so the
+        # first take after the switch already has the model (never blocks).
+        c["smart_turn"] = bool(s.get("smartTurn", c.get("smart_turn", True)))
+        if c["smart_turn"] and flow.smart_turn_enabled():
+            flow.get_smart_turn()
         # the listener binds the command key once at start, so a change to the
         # toggle needs a listener rebuild. A payload without the key (an older
         # cached page) keeps the current value instead of switching it off.

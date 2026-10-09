@@ -56,6 +56,8 @@ const state = {
               llm: "off", groqKey: "", groqModel: "", ollamaModel: "",
               groqKeyVisible: false, spokenPunctuation: true, normalizeNumbers: true,
               voiceCommands: true, handsFree: false, llmPrompt: "", llmPromptDefault: "",
+              // Smart Turn: stop a hands-free take as soon as the phrase sounds finished
+              smartTurn: true,
               // per-app polish style: toggle is saved, appStyles is a read-only
               // [{id, label, hint, apps, web}] list from app_styles.describe()
               appStylesEnabled: true, appStyles: [],
@@ -1093,7 +1095,9 @@ function renderSettings(el) {
       <div class="panel"><h2>Поведінка</h2>
         ${toggleRow("Голосові команди", "«великими літерами», «видали останнє», «переклади англійською» — діють на попередню диктовку", "voiceCommands")}
         ${toggleRow("Режим без утримання", "Тап клавіші вмикає запис, авто-стоп після паузи (або тап ще раз). Інакше — утримувати клавішу", "handsFree",
-          ["hlp-handsfree", "Зазвичай ви утримуєте клавішу, поки говорите. У режимі без утримання один тап вмикає запис, а він сам зупиняється після паузи — зручно для довгих диктовок."])}</div>
+          ["hlp-handsfree", "Зазвичай ви утримуєте клавішу, поки говорите. У режимі без утримання один тап вмикає запис, а він сам зупиняється після паузи — зручно для довгих диктовок."])}
+        ${toggleRow("Розумне визначення кінця фрази", "У режимі без утримання: зупиняє запис одразу, коли фраза звучить завершеною, а не чекає повну паузу. Якщо обриває на півслові — вимкніть", "smartTurn",
+          ["hlp-smartturn", "Невелика модель (8 МБ, завантажується один раз) слухає інтонацію: чи ви закінчили думку, чи просто замислилися. Коротка пауза після завершеної фрази — і запис зупиняється. Пауза посеред речення або «е-е» не зупиняє: тоді діє звичайна довга пауза."])}</div>
       <div class="panel"><h2>Гаряча клавіша</h2>
         <div class="hkwrap"><span class="keycap" id="hkCap">${esc(state.hotkey)}</span>
           <button class="btn ghost" id="hotkeyBtn">Змінити</button></div>
