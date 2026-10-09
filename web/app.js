@@ -151,6 +151,7 @@ function mock(method, args) {
   if (method === "activate_license") return { ok: true, licensed: true, daysLeft: 30, exp: "2026-08-11", reason: "ok" };
   if (method === "save_settings") { console.log("[mock] save_settings", args[0]); return true; }
   if (method === "save_dictionary") { console.log("[mock] save_dictionary", args); return true; }
+  if (method === "history_feed") return { stats: state.stats, recent: state.recent, history: state.history };
   if (method === "history_clear") { state.history = []; return true; }
   if (method === "history_delete" || method === "history_copy") return true;
   if (method === "capture_hotkey") return state.hotkey;
@@ -2052,8 +2053,21 @@ async function tickStatus() {
   if (!st || st === state.homeState) return;
   // respect a manual preview hold; don't yank the hero away from the user
   if (Date.now() < (state.manualHoldUntil || 0)) return;
+  const prev = state.homeState;
   if (state.page === "home") setHomeState(st);
   else state.homeState = st;
+  // a dictation just landed (…-> idle): pull the new row into the open window so
+  // the History/Home list refreshes live instead of only after a restart
+  if (st === "idle" && (prev === "processing" || prev === "recording")) refreshFeed();
+}
+async function refreshFeed() {
+  const f = await api("history_feed");
+  if (!f) return;
+  if (f.stats) state.stats = f.stats;
+  if (f.recent) state.recent = f.recent;
+  if (f.history) state.history = f.history;
+  // only repaint when the user is actually looking at a list that changed
+  if (state.page === "home" || state.page === "history") render();
 }
 let micWarnTicks = 0;
 function pollStatus() {

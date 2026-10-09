@@ -35,12 +35,33 @@ class Api:
     def __init__(self):
         self.gpu = detect_gpu()
 
-    # ---- bootstrap ----
-    def bootstrap(self):
-        c = flow.config
+    # ---- history feed ----
+    def _history_feed(self):
+        """Stats + recent + full history in one query. Shared by bootstrap (once
+        at boot) and history_feed (polled when a dictation lands), so an open
+        window updates its list live instead of only on the next restart."""
         s = flow.history_stats()
         rows = flow.history_last(200)  # single query; recent is a slice of it
         return {
+            "stats": {
+                "wordsToday": s["words_today"], "dictations": s["total"],
+                "wordsTotal": s["words"], "wpm": round(s["wpm"]),
+            },
+            "recent": [{"time": self._pretty_time(ts), "text": text}
+                       for _id, ts, lang, dur, text in rows[:4]],
+            "history": [{"id": _id, "time": ts[11:16], "day": self._day_label(ts),
+                         "lang": lang, "duration": f"{dur:.1f}с", "text": text}
+                        for _id, ts, lang, dur, text in rows],
+        }
+
+    def history_feed(self):
+        return self._history_feed()
+
+    # ---- bootstrap ----
+    def bootstrap(self):
+        c = flow.config
+        return {
+            **self._history_feed(),
             "theme": c.get("theme", "dark"),
             # first-run flag for the onboarding wizard. Defaults to True so a
             # pre-existing config that predates the key is treated as already
@@ -51,15 +72,6 @@ class Api:
             "gpu": self.gpu,
             "hotkey": flow.hotkey_label(c.get("hotkey", "f9")),
             "status": flow.state["status"],
-            "stats": {
-                "wordsToday": s["words_today"], "dictations": s["total"],
-                "wordsTotal": s["words"], "wpm": round(s["wpm"]),
-            },
-            "recent": [{"time": self._pretty_time(ts), "text": text}
-                       for _id, ts, lang, dur, text in rows[:4]],
-            "history": [{"id": _id, "time": ts[11:16], "day": self._day_label(ts),
-                         "lang": lang, "duration": f"{dur:.1f}с", "text": text}
-                        for _id, ts, lang, dur, text in rows],
             "settings": {
                 "autostart": c.get("autostart", False),
                 "floatingPanel": c.get("overlay", True),
