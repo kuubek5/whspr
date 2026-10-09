@@ -90,6 +90,8 @@ class Api:
                 "sound": c.get("sound", False),
                 "autoLang": c.get("auto_lang", False),
                 "model": c.get("model_uk", "stock"),
+                # local engine: "whisper" (default) | "parakeet" (optional)
+                "localEngine": c.get("local_engine", "whisper"),
                 "gpuDevice": self.gpu,
                 "device": c.get("device", "cuda"),
                 "inputDevice": c.get("input_device", ""),
@@ -124,6 +126,8 @@ class Api:
             },
             "devices": flow.list_input_devices(),
             "models": flow.models_status(),
+            # {available, installed, size, quant} for the engine switch
+            "parakeet": flow.parakeet_status(),
             "dictionary": {
                 "hotwords": c.get("dictionary", ""),
                 "commands": [{"phrase": k, "result": v}
@@ -338,6 +342,11 @@ class Api:
         # Writing it from this payload too meant a stale value in the UI state
         # could reset the model whenever any unrelated toggle was flipped.
         c["device"] = "cpu" if s.get("device") == "cpu" else "cuda"
+        # local engine is read on every take (flow.local_engine_for), so no
+        # reload is needed; switching TO parakeet just warms it in the background
+        # so the next dictation does not pay its load time
+        old_engine = c.get("local_engine", "whisper")
+        c["local_engine"] = "parakeet" if s.get("localEngine") == "parakeet" else "whisper"
         c["input_device"] = s.get("inputDevice", "") or ""
         c["mic_on_demand"] = bool(s.get("micOnDemand"))
         c["mute_others"] = bool(s.get("muteOthers"))
@@ -387,7 +396,9 @@ class Api:
         if c["input_device"] != old_dev or c["mic_on_demand"] != old_mode:
             flow.restart_stream()
         if c["device"] != old_device:
-            flow.reload_models()
+            flow.reload_models()  # also rebuilds Parakeet on the new device
+        elif c["local_engine"] == "parakeet" and old_engine != "parakeet":
+            threading.Thread(target=flow.preload_parakeet, daemon=True).start()
         if c["command_mode_enabled"] != old_cmd:
             flow.restart_listener()
         return True
@@ -400,7 +411,10 @@ class Api:
         return flow.models_status()
 
     def download_model(self, key):
-        return flow.download_model(key)
+        return flow.download_model(key)  # also takes "parakeet"
+
+    def parakeet_status(self):
+        return flow.parakeet_status()
 
     def delete_model(self, key):
         return flow.delete_model(key)

@@ -227,6 +227,18 @@ DEFAULTS = {
     # fallback (see CPU_COMPUTE_TYPES); an outright invalid one makes the model
     # load fail, which is logged and leaves dictation unavailable until fixed.
     "compute_type": "",
+    # Local recognition engine: "whisper" (faster-whisper + model_uk above, the
+    # default) or "parakeet" (NVIDIA Parakeet TDT 0.6B v3 through onnx-asr, see
+    # the Parakeet section). Parakeet is an optional extra: if onnx-asr is not
+    # installed, its model is not downloaded, or the language is not one it
+    # knows, the take silently goes through Whisper instead, so flipping this
+    # can never leave the user without dictation.
+    "local_engine": "whisper",
+    # Parakeet weights: "" picks per device (int8 on CPU — 640 MB and the fast
+    # path there; full fp32 on a CUDA onnxruntime — 2.4 GB, because the int8
+    # graph's MatMulInteger ops have no CUDA kernel and bounce back to the CPU).
+    # "int8" or "fp32" forces one for A/B runs.
+    "parakeet_quantization": "",
     "rms_threshold": 0.003,
     # weak mics record faint audio Whisper reads as silence. Quiet clips are
     # scaled up toward target_rms before transcription; max_gain caps the boost
@@ -561,6 +573,9 @@ state = {
     "status": "loading",
     "model": None,
     "models": {},  # model name -> WhisperModel (lazy cache)
+    # the loaded Parakeet recognizer (onnx-asr adapter) or None; built lazily by
+    # load_parakeet() the first time local_engine == "parakeet" needs it
+    "parakeet": None,
     # set by _transcribe_impl when a take has to be boosted at (or near) the
     # max_gain cap — i.e. the mic level is too low in Windows itself. Declared
     # here so the UI can read it before the first dictation ever runs.
@@ -1158,14 +1173,28 @@ def models_status() -> list[dict]:
 
 def download_model(key: str) -> dict:
     """Fetch a model in the background. Returns immediately; progress shows up
-    in state['download'] the same way the first-run model pull does."""
-    spec = MODELS.get(key)
+    in state['download'] the same way the first-run model pull does.
+
+    key "parakeet" fetches the optional Parakeet engine (not a Whisper model, so
+    it is not in MODELS / the model picker): only the files for the quantization
+    this machine will actually run, not the whole 3 GB repo."""
+    patterns = None
+    if key == "parakeet":
+        if not parakeet_available():
+            return {"ok": False, "error": "не встановлено пакет onnx-asr"}
+        quant = _parakeet_quant(_parakeet_providers()[1])
+        spec = {"repo": PARAKEET["repo"], "label": PARAKEET["label"]}
+        patterns = _parakeet_files(quant)
+        if parakeet_installed(quant):
+            return {"ok": True, "already": True}
+    else:
+        spec = MODELS.get(key)
     if spec is None:
         return {"ok": False, "error": "невідома модель"}
     if state.get("downloading"):
         return {"ok": False, "error": "вже качається інша модель"}
     repo = spec["repo"]
-    if model_installed(repo):
+    if patterns is None and model_installed(repo):
         return {"ok": True, "already": True}
 
     def run():
@@ -1176,9 +1205,12 @@ def download_model(key: str) -> dict:
                          args=(spec["label"], stop), daemon=True).start()
         try:
             from huggingface_hub import snapshot_download
-            snapshot_download(repo_id=repo)
+            snapshot_download(repo_id=repo, allow_patterns=patterns)
             log(f"downloaded {repo}")
-            ensure_tokenizer(repo)  # repair repos that ship without one
+            if patterns is None:
+                ensure_tokenizer(repo)  # repair CT2 repos that ship without one
+            elif config.get("local_engine") == "parakeet":
+                preload_parakeet()  # already selected: warm it now
         except Exception as e:
             log(f"download failed for {repo} ({e.__class__.__name__}: {e})")
             state["download_error"] = str(e)
@@ -1679,10 +1711,14 @@ def reload_models() -> None:
     with _model_lock:
         state["models"].clear()
         state["model"] = None
+        # a device switch must rebuild Parakeet's sessions too, or it would keep
+        # running on the provider it was first loaded with
+        state["parakeet"] = None
 
     def boot():
         try:
             state["model"] = model_for(LANGUAGES[state["lang"]])
+            preload_parakeet()
             set_status("idle")
             log("model reloaded on " + config.get("device", "cuda"))
         except Exception as e:
@@ -1712,6 +1748,156 @@ def model_name_for(lang: str) -> str:
 
 def model_for(lang: str) -> WhisperModel:
     return load_model(model_name_for(lang))
+
+
+# ---------------- Parakeet (optional local engine) ----------------
+# NVIDIA Parakeet TDT 0.6B v3: a 600M-parameter FastConformer transducer that
+# covers 25 European languages including Ukrainian. Published FLEURS uk WER is
+# ~6.8% — between whisper-large-v3 (~6.5%) and large-v3-turbo (~7.3%) — at
+# several times turbo's speed, and as a transducer it does not invent "дякую за
+# перегляд" over silence the way Whisper's subtitle-trained decoder does.
+#
+# Runtime: onnx-asr, NOT NeMo. NeMo drags in torch (~2.5 GB of wheels, plus its
+# own CUDA copy) for a model that is just two ONNX graphs and a greedy loop.
+# onnx-asr is a pure-Python wheel whose only hard dependency is numpy; it runs
+# on the onnxruntime that faster-whisper already pulls in for Silero VAD, and
+# loads ONNX exports of the official checkpoint from Hugging Face. sherpa-onnx
+# would also work but ships its own native runtime (a second onnxruntime in the
+# process) and a different model packaging, for no gain here.
+#
+# Everything about Parakeet is optional and imported lazily: the default
+# Whisper path never touches onnx_asr, and any failure here (package missing,
+# model not downloaded, bad provider) falls back to Whisper for that take.
+PARAKEET = {
+    # onnx-asr's registry name and the HF repo it resolves to
+    "name": "nemo-parakeet-tdt-0.6b-v3",
+    "repo": "istupakov/parakeet-tdt-0.6b-v3-onnx",
+    "label": "Parakeet TDT 0.6B v3",
+    "size": {"int8": "640 MB", "fp32": "2.4 GB"},
+}
+# ISO codes Parakeet v3 was trained on. Anything else goes to Whisper.
+PARAKEET_LANGS = frozenset(
+    "bg hr cs da nl en et fi fr de el hu it lv lt mt pl pt ro sk sl es sv ru uk".split())
+
+
+def local_engine_for(lang: str | None, auto: bool = False) -> str:
+    """Which local engine should decode this take: "parakeet" or "whisper".
+
+    Parakeet only when the user picked it AND it can handle the language.
+    In auto-language mode there is no language to check up front — Parakeet
+    identifies the language itself (it has no language token at all), so it is
+    used as is. Unknown values in config fall back to Whisper, never to an error."""
+    if config.get("local_engine", "whisper") != "parakeet":
+        return "whisper"
+    if not auto and lang not in PARAKEET_LANGS:
+        return "whisper"
+    return "parakeet"
+
+
+def _parakeet_providers() -> tuple[list[str], str]:
+    """onnxruntime providers for Parakeet plus a label for the log.
+
+    CUDA only when the user wants the GPU AND the installed onnxruntime actually
+    has the CUDA provider. The stock `onnxruntime` wheel (what requirements.txt
+    and the frozen build ship) is CPU-only; the GPU needs `onnxruntime-gpu`
+    instead, which conflicts with the CPU wheel in the same environment."""
+    try:
+        import onnxruntime as ort
+        avail = ort.get_available_providers()
+    except Exception:
+        avail = []
+    if config.get("device") != "cpu" and "CUDAExecutionProvider" in avail:
+        return ["CUDAExecutionProvider", "CPUExecutionProvider"], "CUDA"
+    return ["CPUExecutionProvider"], "CPU"
+
+
+def _parakeet_quant(device_label: str) -> str:
+    """"int8" or "fp32" — see parakeet_quantization in DEFAULTS."""
+    q = config.get("parakeet_quantization") or ""
+    if q in ("int8", "fp32"):
+        return q
+    return "fp32" if device_label == "CUDA" else "int8"
+
+
+def _parakeet_files(quant: str) -> list[str]:
+    """Repo files onnx-asr needs for one quantization (the mel preprocessor is
+    bundled inside the onnx_asr wheel, so it is not fetched)."""
+    sfx = ".int8" if quant == "int8" else ""
+    files = ["config.json", "vocab.txt",
+             f"encoder-model{sfx}.onnx", f"decoder_joint-model{sfx}.onnx"]
+    if quant == "fp32":
+        files.append("encoder-model.onnx.data")  # >2 GB external weights
+    return files
+
+
+def parakeet_available() -> bool:
+    """True if the onnx-asr package can be imported (cheap spec lookup only)."""
+    import importlib.util
+    return importlib.util.find_spec("onnx_asr") is not None
+
+
+def parakeet_installed(quant: str | None = None) -> bool:
+    """Are the weights for this (or the currently applicable) quantization on disk?"""
+    quant = quant or _parakeet_quant(_parakeet_providers()[1])
+    snap = _snapshot_dir(PARAKEET["repo"])
+    return bool(snap) and all(os.path.isfile(os.path.join(snap, f))
+                              for f in _parakeet_files(quant))
+
+
+def parakeet_status() -> dict:
+    """What the settings page needs to draw the engine switch."""
+    quant = _parakeet_quant(_parakeet_providers()[1])
+    return {"available": parakeet_available(),
+            "installed": parakeet_installed(quant),
+            "size": PARAKEET["size"][quant], "quant": quant}
+
+
+def load_parakeet():
+    """Build (once) and return the onnx-asr Parakeet recognizer.
+
+    Loads strictly from the local HF snapshot (path=..., which onnx-asr treats
+    as offline): a missing model must fail fast and fall back to Whisper, never
+    start a 640 MB download in the middle of a dictation. Shares _model_lock with
+    Whisper so a settings-triggered reload cannot race a load."""
+    with _model_lock:
+        if state.get("parakeet") is not None:
+            return state["parakeet"]
+        import onnx_asr  # lazy: optional dependency, only for this engine
+        providers, dev = _parakeet_providers()
+        quant = _parakeet_quant(dev)
+        snap = _snapshot_dir(PARAKEET["repo"])
+        if not snap or not parakeet_installed(quant):
+            raise FileNotFoundError(f"{PARAKEET['label']} ({quant}) is not downloaded")
+        t0 = time.time()
+        m = onnx_asr.load_model(PARAKEET["name"], snap,
+                                quantization="int8" if quant == "int8" else None,
+                                providers=providers)
+        t1 = time.time()
+        # first run allocates arenas / picks kernels; pay it here, not on a take
+        m.recognize(np.zeros(SAMPLE_RATE, dtype=np.float32), sample_rate=SAMPLE_RATE)
+        log(f"parakeet loaded on {dev} ({quant}) in {t1 - t0:.1f}s, "
+            f"warm-up {time.time() - t1:.1f}s")
+        state["parakeet"] = m
+        return m
+
+
+def preload_parakeet() -> None:
+    """Warm Parakeet in the background-boot thread when it is the chosen engine,
+    so the first dictation does not pay the ~4 s load. Never raises."""
+    if config.get("local_engine", "whisper") != "parakeet":
+        return
+    try:
+        load_parakeet()
+    except Exception as e:
+        log(f"parakeet preload failed ({e.__class__.__name__}: {e}) — "
+            f"dictation will use Whisper")
+
+
+def parakeet_transcribe(audio: np.ndarray) -> str:
+    """Decode one 16 kHz mono float32 clip with Parakeet. Raises on any failure;
+    the caller falls back to Whisper."""
+    m = load_parakeet()
+    return (m.recognize(audio, sample_rate=SAMPLE_RATE) or "").strip()
 
 
 def capitalize_sentences(text: str) -> str:
@@ -2877,13 +3063,48 @@ def _transcribe_impl(pre: list, cur: list, target_hwnd: int,
                 return
             log(f"{dur:.1f}s audio -> {time.time()-t0:.2f}s cloud "
                 f"[{config.get('stt_provider')}/{config.get('stt_model')}]: {text!r}")
+        auto = config.get("auto_lang", False)
+        # Parakeet's transcript when it decoded this take but Whisper is asked
+        # for a second opinion (Russian drift, below); None otherwise
+        pk_text = None
+        if text is None and local_engine_for(lang, auto) == "parakeet":
+            t0 = time.time()
+            try:
+                text = parakeet_transcribe(audio)
+            except Exception as e:
+                # missing package/model or a runtime error: this take goes to
+                # Whisper, which is always there
+                log(f"parakeet failed ({e.__class__.__name__}: {e}) — using Whisper")
+                text = None
+            if text is not None:
+                # Parakeet exposes no avg_logprob / no_speech_prob, so the
+                # confidence numbers stay at the neutral 0.0 set above. In
+                # _hallucination_reason that means rule 2 (short AND unsure)
+                # cannot fire for a Parakeet take, while rule 1 (known subtitle
+                # artifacts) still applies. That is the right trade: a transducer
+                # emits nothing over silence rather than Whisper-style filler, so
+                # the short-unsure rule has little to catch here, and guessing a
+                # confidence would only risk dropping real "так"/"дякую" takes.
+                # Dictionary hotwords and initial_prompt are Whisper-only;
+                # text_fixes.restore_terms below still runs on this output.
+                log(f"{dur:.1f}s audio -> {time.time() - t0:.2f}s parakeet "
+                    f"[{lang}]: {text!r}")
+                # Russian drift: Parakeet has no language token or prompt to
+                # steer, so the Whisper ru_retry trick (re-decode with a heavier
+                # Ukrainian prompt) has no Parakeet equivalent. Instead hand the
+                # take to Whisper — which runs its own ru-retry — and keep
+                # whichever transcript is less Russian (ties keep Parakeet's).
+                if (text and lang == "uk" and not auto
+                        and config.get("ru_retry", True)
+                        and text_fixes.looks_russian(text)):
+                    log("parakeet output looks Russian — asking Whisper")
+                    pk_text, text = text, None
         if text is None:
             hotwords = _build_hotwords(config.get("dictionary", ""))
             t0 = time.time()
             # auto language: let Whisper detect instead of the manual F10 choice.
             # Detection needs the multilingual stock model and no Ukrainian prompt
             # bias, so auto mode trades the uk fine-tune for hands-off language.
-            auto = config.get("auto_lang", False)
             if auto:
                 model = load_model(MODEL_NAME)
                 tr_lang, initial_prompt = None, None
@@ -2983,6 +3204,12 @@ def _transcribe_impl(pre: list, cur: list, target_hwnd: int,
                         log("ru-retry accepted")
                 except Exception as e:
                     log(f"ru-retry failed ({e.__class__.__name__}: {e}) — keeping first pass")
+            if pk_text is not None:
+                if text and text_fixes.ru_score(text) < text_fixes.ru_score(pk_text):
+                    log("whisper second opinion accepted over parakeet")
+                else:
+                    text, avg_logprob, no_speech_prob = pk_text, 0.0, 0.0
+                    log("keeping parakeet output")
         if not text:
             # also the normal outcome when vad_filter is on and Silero judged the
             # whole clip non-speech: `segments` is then empty and there is
@@ -3578,6 +3805,10 @@ def _start_core() -> None:
             finally:
                 stop.set()
                 set_download(False)
+            # Whisper stays loaded even with Parakeet selected: it is the
+            # fallback for unsupported languages, a missing model and the
+            # Russian-drift second opinion (see _transcribe_impl)
+            preload_parakeet()
             set_status("idle")
             log(f"ready. hold {hotkey_label(config['hotkey'])} = dictate "
                 f"({LANGUAGES[state['lang']]})")

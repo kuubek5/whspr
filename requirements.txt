@@ -13,6 +13,12 @@ pycaw>=20240210
 cryptography>=42.0
 # customtkinter powers the older --classic UI; the default UI is pywebview (web/)
 customtkinter>=6.0
+# optional second local engine (NVIDIA Parakeet TDT 0.6B v3, local_engine =
+# "parakeet"). Pure-Python wheel that runs on the onnxruntime faster-whisper
+# already installs (CPU). Imported lazily — without it the app uses Whisper.
+# For Parakeet on the GPU, swap onnxruntime for onnxruntime-gpu (they conflict
+# in one environment) — not done by default.
+onnx-asr>=0.12,<0.13
 # CUDA runtime for ctranslate2 (no system CUDA toolkit needed)
 nvidia-cublas-cu12
 # cuDNN pinned: newer 9.x builds trigger multi-minute runtime kernel
