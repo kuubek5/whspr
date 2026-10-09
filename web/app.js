@@ -62,9 +62,13 @@ const state = {
               overlayOpacity: 82,
               // ---- cloud recognition (BYOK) ----
               sttBackend: "local", sttProvider: "groq",
-              sttModel: "whisper-large-v3", openaiKey: "", elevenlabsKey: "" },
+              sttModel: "whisper-large-v3", openaiKey: "", elevenlabsKey: "",
+              // ---- local engine: "whisper" (default) | "parakeet" ----
+              localEngine: "whisper" },
   devices: [],
   models: [],
+  // optional Parakeet engine: is onnx-asr there, are its weights downloaded
+  parakeet: { available: false, installed: false, size: "640 MB", quant: "int8" },
   dictionary: { hotwords: "", commands: [] },
 };
 
@@ -87,6 +91,7 @@ const MOCK_MODELS = [
   { id: "base", label: "Base", size: "141 MB", note: "дуже легка, помітно гірша якість", installed: false, active: false, diskMb: 0 },
   { id: "tiny", label: "Tiny", size: "74 MB", note: "найшвидша, найгірша якість", installed: false, active: false, diskMb: 0 },
 ];
+const MOCK_PARAKEET = { available: true, installed: false, size: "640 MB", quant: "int8" };
 
 function mock(method, args) {
   if (method === "list_models") return MOCK_MODELS;
@@ -99,7 +104,9 @@ function mock(method, args) {
     if (m) { m.installed = false; m.diskMb = 0; }
     return { ok: true };
   }
+  if (method === "parakeet_status") return MOCK_PARAKEET;
   if (method === "download_model") {
+    if (args[0] === "parakeet") { MOCK_PARAKEET.installed = true; return { ok: true }; }
     const m = MOCK_MODELS.find((x) => x.id === args[0]);
     if (m) { m.installed = true; m.diskMb = 2048; }
     return { ok: true };
@@ -129,6 +136,7 @@ function mock(method, args) {
     devices: [{ name: "Мікрофон (Realtek Audio)" }, { name: "Вхід (XONAR SOUND CARD)" },
               { name: "OnePlus 9R Hands-Free" }],
     models: MOCK_MODELS,
+    parakeet: MOCK_PARAKEET,
     dictionary: {
       hotwords: "Klipper, PID, sinter, FPV, Proxmox, homelab, Vaultwarden",
       commands: [
@@ -170,6 +178,7 @@ async function boot() {
   state.settings = Object.assign(state.settings, b.settings || {});
   state.devices = b.devices || [];
   state.models = b.models || [];
+  if (b.parakeet) state.parakeet = b.parakeet;
   state.dictionary = b.dictionary; state.homeState = b.status || "idle";
   // onboarded may legitimately be false; anything non-boolean means "assume
   // onboarded" so a bridge that predates the flag never traps the user in a wizard
@@ -930,6 +939,14 @@ function renderSettings(el) {
           ${sttModeCard("cloud", "Хмара", ICON.cloud, "Швидко · без GPU · свій ключ")}
         </div>
         <div id="sttLocal"${s.sttBackend === "cloud" ? " hidden" : ""}>
+          <div class="srow" style="margin-top:14px"><div style="min-width:0">
+              <div class="lab lab-h">Рушій${hbtn("hlp-engine")}</div>
+              <div class="hint" id="engHint"></div>
+              ${hnote("hlp-engine", "Whisper — перевірений рушій з українською донавченою моделлю, словником-підказками й захистом від русизмів. Parakeet (NVIDIA) — у кілька разів швидший за точності, близької до Whisper; словник-підказки на нього не діють, але виправлення термінів зі словника після розпізнавання працює. Якщо Parakeet недоступний — диктовка сама піде через Whisper.")}</div>
+            <div class="seg" role="group" aria-label="Рушій розпізнавання">
+              <button data-eng="whisper">Whisper</button>
+              <button data-eng="parakeet">Parakeet</button></div></div>
+          <div id="engPk"></div>
           <div class="mcards" id="mcards" role="radiogroup" aria-label="Модель розпізнавання" style="margin-top:14px"></div>
           <div class="srow" style="margin-top:6px"><div style="min-width:0"><div class="lab">Пристрій обробки</div>
               <div class="hint">Де рахувати модель: GPU швидко, CPU повільний запасний. Уся обробка локально</div></div>
@@ -1041,7 +1058,12 @@ function renderSettings(el) {
     renderModelList(el.querySelector("#mcards"));
     const selG = el.querySelector("#selGpu");
     selG.value = s.device || "cuda";
-    selG.onchange = () => { s.device = selG.value; saveSettings(); };
+    selG.onchange = () => {
+      s.device = selG.value; saveSettings();
+      // int8 on CPU vs fp32 on GPU: the download size/installed flag may change
+      refreshParakeet(el);
+    };
+    bindEnginePane(el);
     bindSttPane(el);
     bindAiPane(el);
   }
@@ -1236,6 +1258,76 @@ function bindSttCloud(el) {
       vb.disabled = false; vb.textContent = lbl;
     }
   };
+}
+// ---- local engine switch (Whisper | Parakeet) ----
+// Parakeet is optional: the backend falls back to Whisper on its own whenever it
+// can't run, so this pane only has to explain the state and offer the download.
+function engineHintText() {
+  return state.settings.localEngine === "parakeet"
+    ? "Parakeet — швидший; моделі Whisper нижче лишаються запасним варіантом"
+    : "Whisper — з українською моделлю, словником і захистом від русизмів";
+}
+function enginePkHtml() {
+  const p = state.parakeet || {};
+  if (state.settings.localEngine !== "parakeet") return "";
+  if (!p.available) {
+    return `<div class="note warn" style="margin-top:6px">${svg(ICON.warn, 15)}У цій збірці немає Parakeet — диктовка йде через Whisper</div>`;
+  }
+  if (p.installed) return "";
+  return `<div class="srow"><div style="min-width:0"><div class="lab">Модель Parakeet не завантажена</div>
+      <div class="hint" id="pkDlTx">Завантаження · ${esc(p.size || "")}. Поки її немає, диктовка йде через Whisper</div></div>
+    <button class="btn ghost" id="pkDl">Завантажити</button></div>`;
+}
+function syncEngine(el) {
+  const s = state.settings;
+  el.querySelectorAll(".seg [data-eng]").forEach((b) => {
+    const on = b.dataset.eng === s.localEngine;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+  const hint = el.querySelector("#engHint");
+  if (hint) hint.textContent = engineHintText();
+  const pk = el.querySelector("#engPk");
+  if (!pk) return;
+  pk.innerHTML = enginePkHtml();
+  const dl = pk.querySelector("#pkDl");
+  if (dl) dl.onclick = async () => {
+    dl.disabled = true; dl.textContent = "Качається…";
+    const r = await api("download_model", "parakeet");
+    if (r && r.ok === false) { toast(r.error || "не вдалося"); dl.disabled = false; dl.textContent = "Завантажити"; return; }
+    pollParakeetDownload(el);
+  };
+}
+async function refreshParakeet(el) {
+  state.parakeet = (await api("parakeet_status")) || state.parakeet;
+  syncEngine(el);
+}
+let pkDlTimer = null;
+function pollParakeetDownload(el) {
+  if (pkDlTimer) return;
+  pkDlTimer = setInterval(async () => {
+    const d = await api("get_download");
+    if (!document.getElementById("engPk")) { clearInterval(pkDlTimer); pkDlTimer = null; return; }
+    if (d && d.downloading) {
+      const tx = document.getElementById("pkDlTx");
+      if (tx) tx.textContent = d.mb ? `Качається… ${fmtMb(d.mb)}` : "Качається…";
+    } else {
+      clearInterval(pkDlTimer); pkDlTimer = null;
+      if (d && d.error) toast("Не вдалося завантажити модель: " + d.error);
+      await refreshParakeet(el);
+    }
+  }, 700);
+}
+function bindEnginePane(el) {
+  const s = state.settings;
+  if (s.localEngine !== "parakeet") s.localEngine = "whisper";
+  syncEngine(el);
+  el.querySelectorAll(".seg [data-eng]").forEach((b) => b.onclick = () => {
+    if (b.dataset.eng === s.localEngine) return;
+    s.localEngine = b.dataset.eng;
+    syncEngine(el);
+    saveSettings();
+  });
 }
 function bindSttPane(el) {
   const cards = [...el.querySelectorAll("#sttModes [data-stt]")];

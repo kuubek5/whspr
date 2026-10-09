@@ -24,9 +24,17 @@ hiddenimports = ["comtypes", "pystray._win32", "cuda_setup", "webview_app",
                  # lose the "raise the mic level" button. Both listed explicitly.
                  "text_fixes", "mic_level"]
 
-# pull in data files / dylibs / submodules for the tricky native packages
+# pull in data files / dylibs / submodules for the tricky native packages.
+# onnx_asr + onnxruntime are for the optional Parakeet engine: flow.py imports
+# onnx_asr only inside load_parakeet(), so static analysis never sees it, and
+# onnx_asr loads its mel-preprocessor graphs (onnx_asr/preprocessors/data/*.onnx)
+# from package data — collect_all brings both the submodules and those files.
+# onnxruntime is listed explicitly because faster_whisper also imports it only
+# lazily (Silero VAD); its DLLs must be in the bundle for either feature. If the
+# packages are missing at build time the try/except skips them and the build
+# simply ships without Parakeet (the app then falls back to Whisper).
 for pkg in ("webview", "ctranslate2", "faster_whisper", "sounddevice",
-            "tokenizers", "huggingface_hub", "av"):
+            "tokenizers", "huggingface_hub", "av", "onnxruntime", "onnx_asr"):
     try:
         d, b, h = collect_all(pkg)
         datas += d
