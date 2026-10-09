@@ -26,7 +26,10 @@ hiddenimports = ["comtypes", "pystray._win32", "cuda_setup", "webview_app",
 
 # pull in data files / dylibs / submodules for the tricky native packages
 for pkg in ("webview", "ctranslate2", "faster_whisper", "sounddevice",
-            "tokenizers", "huggingface_hub", "av"):
+            "tokenizers", "huggingface_hub", "av",
+            # Silero VAD (hands-free auto-stop, vad_filter) runs on onnxruntime,
+            # which faster_whisper only imports lazily inside a function
+            "onnxruntime"):
     try:
         d, b, h = collect_all(pkg)
         datas += d

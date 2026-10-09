@@ -314,6 +314,22 @@ DEFAULTS = {
     "hands_free": False,
     "silence_stop_s": 2.2,   # silence this long ends a hands-free take
     "max_utterance_s": 60,   # hard cap so a noisy mic can't record forever
+    # What decides "the user has stopped talking" in hands-free mode:
+    #   "vad" — Silero speech probability (the onnx model faster-whisper already
+    #           ships). It scores whether a frame SOUNDS like speech, so it does
+    #           not care how loud the mic is. Measured on a TTS sample scaled
+    #           down to rms 0.005 (this machine's quietest takes) with no boost:
+    #           speech frames still scored 0.8-1.0, trailing silence 0.0.
+    #   "rms" — the old loudness heuristic (floor = 22% of the take's peak). On
+    #           a mic at 0.005-0.03 RMS it both cut takes on natural pauses and
+    #           trailed for seconds after the user stopped. Kept as the fallback
+    #           and used automatically if the VAD model cannot be loaded.
+    "autostop_engine": "vad",
+    # Silero probability at/above which a 32 ms frame counts as speech. Frames
+    # below (threshold - 0.15) count as silence; the band in between keeps the
+    # current state, the same hysteresis Silero's own get_speech_timestamps uses,
+    # so a word trailing off at p=0.4 neither restarts nor starts the timer.
+    "vad_speech_threshold": 0.5,
     # LLM post-processing: "off" | "groq" | "ollama"
     "llm": "off",
     # Paste the transcript the moment Whisper is done, then quietly rewrite it
@@ -1776,6 +1792,209 @@ def audio_callback(indata, frames, t, status):
         pass
 
 
+# ---------------- Hands-free auto-stop ----------------
+# Silero v5/v6 at 16 kHz takes exactly 512-sample (32 ms) frames.
+VAD_FRAME = 512
+VAD_FRAME_S = VAD_FRAME / SAMPLE_RATE
+# Audio fed to Silero per poll. faster-whisper's SileroVADModel starts every
+# call with a zeroed LSTM state, so the first frames of a window are scored
+# "cold"; ~1 s of context warms it up before the frames we actually read (only
+# the newest ones, see silence_watch). Measured ~1 ms per 1 s window on CPU, so
+# polling every 100 ms costs ~1% of one core.
+VAD_WINDOW_FRAMES = 32
+# Speech must add up to this much before auto-stop arms. One stray frame (a
+# click, a cough, the keyboard) must not arm it, or the opening pause would end
+# the take before the user has said a word.
+VAD_MIN_SPEECH_S = 0.25
+
+
+class RmsAutoStop:
+    """The original loudness heuristic, unchanged in behaviour, pulled out of
+    silence_watch so both engines share one loop. Fed the live block RMS and a
+    wall-clock time; returns True when the take should stop."""
+
+    name = "rms"
+
+    def __init__(self, gap_s: float):
+        self.gap = gap_s
+        self.peak, self.floor, self.lvl = 0.0, 0.0025, 0.0
+        self.silent_since = None
+        self.now = 0.0
+
+    def feed(self, lvl: float, now: float) -> bool:
+        self.lvl, self.now = lvl, now
+        self.peak = max(self.peak, lvl)
+        # A quiet mic (XONAR analog in ~0.008-0.013 RMS) never crossed the old
+        # 0.015 arm gate, so auto-stop never armed and the take ran to the 60 s
+        # cap. Arm at 0.006 — above ambient noise (~0.001-0.003), below this
+        # mic's speech — and make the silence floor RELATIVE to the take's own
+        # peak so it scales to any mic instead of assuming a fixed loudness.
+        spoke = self.peak > 0.006
+        # silence = well below this take's own peak, but forgiving: a very quiet
+        # mic (rms ~0.004) dips under an aggressive floor between words, which
+        # used to auto-stop the user mid-sentence.
+        self.floor = max(0.0025, self.peak * 0.22)
+        if spoke and lvl < self.floor:
+            if self.silent_since is None:
+                self.silent_since = now
+            return now - self.silent_since >= self.gap
+        if lvl > self.floor * 1.5:
+            # Only a CLEARLY voiced block resets the silence timer. On a quiet
+            # mic the level jitters right around `floor` after the user stops
+            # talking; treating every marginal blip as speech kept restarting
+            # the timer, so the take trailed for seconds.
+            self.silent_since = None
+        return False
+
+    def describe(self) -> str:
+        sil = 0 if self.silent_since is None else self.now - self.silent_since
+        return (f"engine=rms peak={self.peak:.4f} floor={self.floor:.4f} "
+                f"lvl={self.lvl:.4f} silence={sil * 1000:.0f}ms")
+
+
+class VadAutoStop:
+    """Speech-probability end-of-utterance decision. Pure: fed one Silero
+    probability per 32 ms frame plus that frame's END time on the audio clock
+    (seconds of recorded audio, not wall time — deterministic, and immune to the
+    poll thread being late), returns True when the take should stop.
+
+    Rules: arm only after VAD_MIN_SPEECH_S of speech frames (the opening pause
+    never stops a take); after that, stop once `gap_s` of CONTINUOUS non-speech
+    has passed. Any speech frame cancels a pending stop."""
+
+    name = "vad"
+
+    def __init__(self, gap_s: float, threshold: float = 0.5,
+                 min_speech_s: float = VAD_MIN_SPEECH_S):
+        self.gap = gap_s
+        self.threshold = threshold
+        # Silero's own neg_threshold: hysteresis so a frame hovering at the
+        # threshold doesn't flip speech/silence on every poll
+        self.neg_threshold = max(0.01, threshold - 0.15)
+        self.min_speech_s = min_speech_s
+        self.speech_s = 0.0
+        self.silent_since = None
+        self.last_prob = 0.0
+        self.last_speech_prob = 0.0
+        self.t = 0.0
+
+    @property
+    def armed(self) -> bool:
+        return self.speech_s >= self.min_speech_s - 1e-9
+
+    def silence_s(self) -> float:
+        return 0.0 if self.silent_since is None else self.t - self.silent_since
+
+    def feed(self, prob: float, t: float) -> bool:
+        self.last_prob, self.t = prob, t
+        if prob >= self.threshold:
+            self.speech_s += VAD_FRAME_S
+            self.last_speech_prob = prob
+            self.silent_since = None
+            return False
+        if prob < self.neg_threshold and self.armed:
+            if self.silent_since is None:
+                # silence began at the START of this frame
+                self.silent_since = t - VAD_FRAME_S
+            return self.silence_s() >= self.gap - 1e-9
+        # in the hysteresis band, or not armed yet: keep the current state. A
+        # pending timer keeps running through a band frame — a word trailing
+        # off is not new speech — but a band frame never STARTS the timer.
+        return self.silent_since is not None and self.silence_s() >= self.gap - 1e-9
+
+    def describe(self) -> str:
+        return (f"engine=vad silence={self.silence_s() * 1000:.0f}ms "
+                f"last_p={self.last_prob:.2f} last_speech_p="
+                f"{self.last_speech_prob:.2f} speech={self.speech_s:.1f}s "
+                f"thr={self.threshold:.2f}")
+
+
+_vad_model = None
+_vad_failed = False
+_vad_lock = threading.Lock()
+
+
+def _load_vad_model():
+    """Separate from get_autostop_vad so tests can make it fail."""
+    from faster_whisper.vad import get_vad_model as _fw_get_vad_model
+    m = _fw_get_vad_model()
+    m(np.zeros(VAD_FRAME * 2, dtype=np.float32))  # first run allocates; do it now
+    return m
+
+
+def get_autostop_vad():
+    """The shared Silero model, loaded once (~0.2 s). Returns None — and logs
+    ONCE — if it cannot be loaded (onnxruntime or the onnx asset missing from a
+    build); callers then fall back to the rms engine. Never raises: a broken VAD
+    must cost the user auto-stop quality, never dictation."""
+    global _vad_model, _vad_failed
+    with _vad_lock:
+        if _vad_model is None and not _vad_failed:
+            t0 = time.time()
+            try:
+                _vad_model = _load_vad_model()
+                log(f"auto-stop VAD loaded ({time.time() - t0:.2f}s)")
+            except Exception as e:
+                _vad_failed = True
+                log(f"auto-stop VAD unavailable ({e.__class__.__name__}: {e}) "
+                    f"— falling back to rms auto-stop")
+        return _vad_model
+
+
+def make_autostop(gap_s: float):
+    """Pick the engine for one hands-free take: the configured one, or rms if
+    VAD was asked for but cannot be loaded."""
+    if str(config.get("autostop_engine", "vad")).lower() == "vad":
+        if get_autostop_vad() is not None:
+            thr = float(config.get("vad_speech_threshold", 0.5))
+            return VadAutoStop(gap_s, threshold=thr)
+    return RmsAutoStop(gap_s)
+
+
+def _recorded_tail(n_samples: int) -> tuple[np.ndarray, int]:
+    """(last n_samples of this take as flat float32, total samples recorded so
+    far). Copies only the tail blocks, so it stays cheap on a 60 s take."""
+    with _buf_lock:
+        total = sum(len(c) for c in chunks)
+        tail, got = [], 0
+        for c in reversed(chunks):
+            if got >= n_samples:
+                break
+            tail.append(c)
+            got += len(c)
+    if not tail:
+        return np.zeros(0, dtype=np.float32), total
+    audio = np.concatenate(tail[::-1]).reshape(-1).astype(np.float32)
+    return audio[-n_samples:], total
+
+
+def vad_poll(vad, dec: "VadAutoStop", fed: int) -> tuple[bool, int]:
+    """One hands-free poll: score the frames recorded since the last poll and
+    feed them to `dec`. `fed` = frames of this take already scored. Returns
+    (should_stop, new fed). May raise if the model does; the caller falls back."""
+    audio, total = _recorded_tail(VAD_WINDOW_FRAMES * VAD_FRAME)
+    # align the window to the frame grid of the WHOLE take, so frame k always
+    # covers the same samples from poll to poll
+    rem = total % VAD_FRAME
+    if rem:
+        audio = audio[:-rem]
+    n_total = total // VAD_FRAME
+    n_win = len(audio) // VAD_FRAME
+    # if the poll thread was starved for > 1 s, the frames that fell out of the
+    # window are skipped — the audio clock below still stays correct
+    new = min(n_total - fed, n_win)
+    if new <= 0:
+        return False, max(fed, n_total)
+    probs = np.asarray(vad(audio[len(audio) - n_win * VAD_FRAME:])).reshape(-1)
+    # score only the newest frames: they sit at the end of the window, after up
+    # to ~1 s of warm-up context
+    first = n_total - new
+    for i, p in enumerate(probs[-new:]):
+        if dec.feed(float(p), (first + i + 1) * VAD_FRAME_S):
+            return True, n_total
+    return False, n_total
+
+
 def mic_test(enable: bool) -> bool:
     """Open the mic (if needed) so the settings meter can show a live level.
     Returns True if a stream is available."""
@@ -2620,47 +2839,44 @@ def start_listener() -> "_Listeners":
             close_stream()
 
     def silence_watch():
-        """Hands-free: stop recording after a stretch of silence. The threshold
-        is a fraction of the loudest level seen this take, so it adapts to the
-        mic instead of relying on a fixed cutoff. Auto-stop is only armed once
-        the user has actually spoken, so it never fires on the opening pause."""
-        time.sleep(0.3)  # let the stream fill before judging levels
-        peak, silent_since, t_start = 0.0, None, time.time()
-        gap = config.get("silence_stop_s", 1.5)
+        """Hands-free: stop recording once the user has stopped talking. The
+        decision lives in VadAutoStop / RmsAutoStop (see make_autostop); this
+        loop only feeds them. Auto-stop arms only after real speech, so it never
+        fires on the opening pause; max_utterance_s is a hard cap either way."""
+        time.sleep(0.3)  # let the stream fill before judging anything
+        gap = float(config.get("silence_stop_s", 1.5))
         hard_max = config.get("max_utterance_s", 60)
+        t_start = time.time()
+        dec = make_autostop(gap)
+        vad = _vad_model if dec.name == "vad" else None
+        fed = 0  # frames of this take already scored by the VAD
+        log(f"hands-free: auto-stop engine={dec.name} gap={gap}s")
         while state["recording"]:
-            lvl = state.get("input_level", 0.0)
-            peak = max(peak, lvl)
-            # A quiet mic (XONAR analog in ~0.008-0.013 RMS) never crossed the
-            # old 0.015 arm gate, so auto-stop never armed and the take ran to
-            # the 60 s cap. Lower the arm bar to 0.006 — above ambient noise
-            # (~0.001-0.003), below this mic's speech — and make the silence
-            # floor RELATIVE to the take's own peak so it scales to any mic
-            # instead of assuming a fixed loudness.
-            spoke = peak > 0.006          # armed only after real speech
-            # silence = well below this take's own peak, but forgiving: a very
-            # quiet mic (rms ~0.004) dips under an aggressive floor between
-            # words, which used to auto-stop the user mid-sentence.
-            floor = max(0.0025, peak * 0.22)
-            if spoke and lvl < floor:
-                silent_since = silent_since or time.time()
-                if time.time() - silent_since >= gap:
-                    log(f"hands-free: silence -> auto stop "
-                        f"(peak={peak:.4f} floor={floor:.4f})")
-                    stop_rec()
-                    return
-            elif lvl > floor * 1.5:
-                # Only a CLEARLY voiced block resets the silence timer. On a quiet
-                # mic the level jitters right around `floor` after the user stops
-                # talking; treating every marginal blip as speech kept restarting
-                # the timer, so the take trailed for seconds. Blips within 1.5x of
-                # the floor no longer cancel a pending stop — the tail gets cut.
-                silent_since = None
+            stop = False
+            if vad is not None:
+                try:
+                    stop, fed = vad_poll(vad, dec, fed)
+                except Exception as e:
+                    # never let a VAD hiccup end or wedge dictation: finish THIS
+                    # take on the loudness heuristic instead
+                    log(f"hands-free: VAD failed mid-take ({e.__class__.__name__}: "
+                        f"{e}) — rms auto-stop for this take")
+                    dec, vad = RmsAutoStop(gap), None
+            else:
+                stop = dec.feed(state.get("input_level", 0.0), time.time())
+            if stop and state["recording"]:
+                log(f"hands-free: silence -> auto stop ({dec.describe()})")
+                stop_rec()
+                return
             if time.time() - t_start >= hard_max:
-                log(f"hands-free: {hard_max}s cap -> auto stop")
+                log(f"hands-free: {hard_max}s cap -> auto stop ({dec.describe()})")
                 stop_rec()
                 return
             time.sleep(0.1)
+        # The user tapped the hotkey themselves. Logged with the engine's state
+        # so a trailing take ("had to stop it by hand") is visible in the log
+        # as evidence, not just the auto-stops.
+        log(f"hands-free: manual stop ({dec.describe()})")
 
     def toggle_hands_free():
         # debounce key auto-repeat and accidental double taps
@@ -2956,6 +3172,12 @@ def _start_core() -> None:
             set_status("idle")
             log(f"ready. hold {hotkey_label(config['hotkey'])} = dictate "
                 f"({LANGUAGES[state['lang']]})")
+            # Pre-load the auto-stop VAD (~0.2 s) off the hot path so the first
+            # hands-free take doesn't pay for it. Loaded whenever the engine is
+            # "vad", not only with hands_free on: the user can flip hands-free
+            # on later without a restart. Failure is logged and harmless.
+            if str(config.get("autostop_engine", "vad")).lower() == "vad":
+                get_autostop_vad()
         except Exception as e:
             log(f"model load failed ({e.__class__.__name__}: {e}) — "
                 f"dictation unavailable")
