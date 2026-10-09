@@ -33,7 +33,10 @@
 | `replacements` | obj | (кілька) | голосові команди `фраза → текст` |
 | `llm` | str | `"off"` | постобробка: `off` / `groq` / `ollama` |
 | `groq_api_key` | str | `""` | ключ Groq (якщо `llm: groq`) |
-| `groq_model` | str | `llama-3.3-70b-versatile` | модель Groq |
+| `groq_model` | str | `openai/gpt-oss-20b` | модель Groq |
+| `groq_reasoning_effort` | str | `"low"` | скільки «думає» gpt-oss перед виправленням: `low` / `medium` / `high`; `""` — як за замовчуванням у Groq. Іншим моделям не надсилається |
+| `polish_skip_short` | bool | `true` | не звати AI для коротких фраз, які Whisper уже розставив (AI їх не змінює) |
+| `polish_skip_max_words` | int | `3` | до скількох слів фраза вважається короткою; `0` — завжди звати AI |
 | `ollama_model` | str | `qwen2.5:7b` | модель Ollama |
 | `autostart` | bool | `false` | копіювати ярлик у Startup |
 
