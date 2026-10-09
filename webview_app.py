@@ -72,6 +72,9 @@ class Api:
             "license": flow.license_status(),
             "gpu": self.gpu,
             "hotkey": flow.hotkey_label(c.get("hotkey", "f9")),
+            # command mode key; "" when unbound (hotkey_label would otherwise
+            # render parse_hotkey's "f9" fallback for an empty spec)
+            "commandHotkey": self._command_label(),
             "status": flow.state["status"],
             "settings": {
                 "autostart": c.get("autostart", False),
@@ -97,6 +100,7 @@ class Api:
                 "normalizeNumbers": c.get("normalize_numbers", True),
                 "voiceCommands": c.get("voice_commands", True),
                 "handsFree": c.get("hands_free", False),
+                "commandMode": c.get("command_mode_enabled", True),
                 "llm": c.get("llm", "off"),
                 "groqKey": c.get("groq_api_key", ""),
                 "groqModel": c.get("groq_model", ""),
@@ -346,6 +350,11 @@ class Api:
         c["normalize_numbers"] = bool(s.get("normalizeNumbers"))
         c["voice_commands"] = bool(s.get("voiceCommands"))
         c["hands_free"] = bool(s.get("handsFree"))
+        # the listener binds the command key once at start, so a change to the
+        # toggle needs a listener rebuild. A payload without the key (an older
+        # cached page) keeps the current value instead of switching it off.
+        old_cmd = c.get("command_mode_enabled", True)
+        c["command_mode_enabled"] = bool(s.get("commandMode", old_cmd))
         if s.get("llm") in ("off", "groq", "ollama"):
             c["llm"] = s["llm"]
         # blank model fields fall back to the shipped defaults rather than
@@ -379,6 +388,8 @@ class Api:
             flow.restart_stream()
         if c["device"] != old_device:
             flow.reload_models()
+        if c["command_mode_enabled"] != old_cmd:
+            flow.restart_listener()
         return True
 
     def list_devices(self):
@@ -449,6 +460,37 @@ class Api:
         flow.capture_hotkey(on_done)
         done.wait(timeout=10)
         return result.get("label", flow.hotkey_label(flow.config.get("hotkey", "f9")))
+
+    @staticmethod
+    def _command_label():
+        spec = flow.config.get("command_hotkey", "") or ""
+        return flow.hotkey_label(spec) if spec.strip() else ""
+
+    def capture_command_hotkey(self):
+        """Capture the command-mode key. Returns {"ok", "label", "error"}.
+
+        Refuses the dictation key itself (one key cannot mean both "type what I
+        say" and "edit my selection") and a lone modifier, which would fire on
+        every ordinary Ctrl+C / Alt+Tab the user types."""
+        result = {}
+        done = threading.Event()
+
+        def on_done(spec):
+            keys = flow.parse_hotkey(spec)
+            if keys == flow.parse_hotkey(flow.config.get("hotkey", "f9")):
+                result["error"] = "Ця клавіша вже запускає диктування"
+            elif keys <= flow.MODS_SET:
+                result["error"] = "Потрібна звичайна клавіша, не лише Ctrl/Alt/Shift"
+            else:
+                flow.config["command_hotkey"] = spec
+                flow.save_config(flow.config)
+                flow.restart_listener()
+            done.set()
+
+        flow.capture_hotkey(on_done)
+        finished = done.wait(timeout=10)
+        err = result.get("error", "" if finished else "Час вийшов — спробуйте ще")
+        return {"ok": not err, "label": self._command_label(), "error": err}
 
 
 def run() -> None:
