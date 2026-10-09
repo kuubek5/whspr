@@ -74,7 +74,7 @@ const state = {
   models: [],
   // optional Parakeet engine: is onnx-asr there, are its weights downloaded
   parakeet: { available: false, installed: false, size: "640 MB", quant: "int8" },
-  dictionary: { hotwords: "", commands: [] },
+  dictionary: { hotwords: "", commands: [], snippets: [], snippetsEnabled: true },
 };
 
 // ---- bridge ----
@@ -159,6 +159,11 @@ function mock(method, args) {
         { phrase: "кома", result: "," }, { phrase: "крапка", result: "." },
         { phrase: "знак питання", result: "?" },
       ],
+      snippets: [
+        { trigger: "мій підпис", text: "З повагою,\nРоман\n+380 00 000 00 00" },
+        { trigger: "посилання на календар", text: "https://cal.example.com/roma" },
+      ],
+      snippetsEnabled: true,
     },
   };
   if (method === "get_status") return state.homeState;
@@ -174,6 +179,7 @@ function mock(method, args) {
   if (method === "activate_license") return { ok: true, licensed: true, daysLeft: 30, exp: "2026-08-11", reason: "ok" };
   if (method === "save_settings") { console.log("[mock] save_settings", args[0]); return true; }
   if (method === "save_dictionary") { console.log("[mock] save_dictionary", args); return true; }
+  if (method === "save_snippets") { console.log("[mock] save_snippets", args); return true; }
   if (method === "history_feed") return { stats: state.stats, recent: state.recent, history: state.history };
   if (method === "history_clear") { state.history = []; return true; }
   if (method === "history_delete" || method === "history_copy") return true;
@@ -197,7 +203,11 @@ async function boot() {
   state.devices = b.devices || [];
   state.models = b.models || [];
   if (b.parakeet) state.parakeet = b.parakeet;
-  state.dictionary = b.dictionary; state.homeState = b.status || "idle";
+  state.dictionary = b.dictionary;
+  // a bridge that predates snippets sends no list; default so the page renders
+  if (!Array.isArray(state.dictionary.snippets)) state.dictionary.snippets = [];
+  if (typeof state.dictionary.snippetsEnabled !== "boolean") state.dictionary.snippetsEnabled = true;
+  state.homeState = b.status || "idle";
   // onboarded may legitimately be false; anything non-boolean means "assume
   // onboarded" so a bridge that predates the flag never traps the user in a wizard
   state.onboarded = (typeof b.onboarded === "boolean") ? b.onboarded : true;
@@ -780,8 +790,18 @@ function renderDictionary(el) {
       <div class="desc">Промовте фразу зліва — KuubWave вставить символ праворуч. Наприклад: «нова думка» = ⏎</div>
       <div class="cmd-list" id="cmdlist"></div>
     </div>
+    <div class="panel">
+      <div class="dhead"><div class="di c">${svg(ICON.dictionary, 20)}</div>
+        <h2 class="lab-h">Сніпети${hbtn("hlp-snippets")}</h2>
+        <button class="addbtn" id="snipAdd">${svg(ICON.plus, 14)}Додати</button>
+        <button class="tg ${state.dictionary.snippetsEnabled ? "on" : ""}" role="switch" id="snipOn"
+          aria-checked="${state.dictionary.snippetsEnabled ? "true" : "false"}" aria-label="Увімкнути сніпети"><span class="th"></span></button></div>
+      <div class="desc">Скажіть лише фразу — KuubWave вставить збережений текст без змін. Наприклад: «мій підпис» → ваш підпис</div>
+      ${hnote("hlp-snippets", "Сніпет спрацьовує, тільки коли вся диктовка — це його фраза (можна з «вставити» на початку). Якщо фраза прозвучить посеред речення, текст надиктується як звичайно. Текст сніпета вставляється дослівно: з усіма рядками, без AI-полірування й автозамін. Після вставки «видали це» прибере його.")}
+      <div class="snip-list" id="sniplist"></div>
+    </div>
     <div class="dict-save"><button class="btn pri" id="dictSave">Зберегти</button></div>`;
-  drawHotwords(); drawCmds();
+  drawHotwords(); drawCmds(); drawSnippets();
   const add = el.querySelector("#hwadd");
   add.onkeydown = (e) => {
     if (e.key !== "Enter" && e.key !== ",") return;
@@ -804,10 +824,43 @@ function renderDictionary(el) {
     const last = rows[rows.length - 1];
     if (last) last.querySelector(".p").focus();
   };
+  el.querySelector("#snipAdd").onclick = () => {
+    state.dictionary.snippets.push({ trigger: "", text: "" }); drawSnippets();
+    const rows = document.querySelectorAll("#sniplist .snip");
+    const last = rows[rows.length - 1];
+    if (last) last.querySelector(".t").focus();
+  };
+  const sw = el.querySelector("#snipOn");
+  sw.onclick = () => {
+    const on = !state.dictionary.snippetsEnabled;
+    state.dictionary.snippetsEnabled = on;
+    sw.classList.toggle("on", on); sw.setAttribute("aria-checked", on ? "true" : "false");
+  };
   el.querySelector("#dictSave").onclick = async () => {
     await api("save_dictionary", state.dictionary.hotwords, state.dictionary.commands);
+    // rows missing a trigger or text are dropped by the bridge; mirror that
+    // here so the page shows exactly what was saved
+    state.dictionary.snippets = state.dictionary.snippets.filter((s) => s.trigger.trim() && s.text.trim());
+    await api("save_snippets", state.dictionary.snippets, state.dictionary.snippetsEnabled);
+    drawSnippets();
     toast("Словник збережено");
   };
+}
+function drawSnippets() {
+  const l = document.getElementById("sniplist"); if (!l) return;
+  const sn = state.dictionary.snippets;
+  if (!sn.length) { l.innerHTML = `<div class="dict-empty">Ще немає сніпетів — додайте підпис, адресу чи посилання</div>`; return; }
+  l.innerHTML = sn.map((s, i) => `<div class="snip" data-i="${i}">
+    <div class="snip-top">
+      <input class="inp t" value="${esc(s.trigger)}" placeholder="фраза, напр. мій підпис" aria-label="Фраза-тригер">
+      <button class="mini del" aria-label="Видалити сніпет">${svg(ICON.trash, 14)}</button></div>
+    <textarea class="ta x" rows="3" placeholder="Текст, який буде вставлено" aria-label="Текст сніпета">${esc(s.text)}</textarea></div>`).join("");
+  l.querySelectorAll(".snip").forEach((row) => {
+    const i = +row.dataset.i;
+    row.querySelector(".t").oninput = (e) => (sn[i].trigger = e.target.value);
+    row.querySelector(".x").oninput = (e) => (sn[i].text = e.target.value);
+    row.querySelector(".del").onclick = () => { sn.splice(i, 1); drawSnippets(); };
+  });
 }
 function drawHotwords() {
   const c = document.getElementById("hwchips"); if (!c) return;

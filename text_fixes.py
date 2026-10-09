@@ -611,3 +611,81 @@ def polish_is_safe(raw: str, polished: str) -> bool:
         if overlap < 0.34 and expanded:
             return False
     return True
+
+
+# ------------------------------------------------------------- 6. snippets
+
+# Words that may precede a snippet trigger: "вставити мій підпис" reads more
+# naturally to some people than a bare "мій підпис". Optional, never required,
+# and only ever stripped from the very start of the utterance.
+_SNIPPET_PREFIXES: tuple[str, ...] = (
+    "вставити сніпет", "встав сніпет", "вставити", "вставте", "встав",
+    "insert snippet", "paste snippet", "insert", "paste",
+)
+# Fuzzy matching is only for triggers long enough that one misheard letter is
+# noise rather than a different phrase. Below this (folded, spaces included) a
+# trigger must match exactly, so short ones like "адреса" never fire on a
+# near-miss.
+_SNIPPET_MIN_FUZZY_LEN = 8
+_SNIPPET_WORD_RE = re.compile(r"[^\W_]+(?:'[^\W_]+)*", re.UNICODE)
+
+
+def snippet_key(phrase: str) -> str:
+    """Comparison key for a trigger or an utterance: apostrophes normalised,
+    case folded, every punctuation mark dropped, words single-spaced. "Мій
+    підпис." / "мій  підпис!" / "МІЙ ПІДПИС" all give "мій підпис"."""
+    return " ".join(_SNIPPET_WORD_RE.findall(_fold(phrase or "")))
+
+
+def match_snippet(text: str, snippets: dict, fuzzy: bool = True):
+    """Return (trigger, body) when the WHOLE utterance is a snippet trigger,
+    optionally after a "вставити ..." prefix; None otherwise.
+
+    Whole-utterance only, by design: a snippet replaces the entire take with a
+    stored block, so a sentence that merely CONTAINS the trigger ("пришлю мій
+    підпис завтра") must be dictated as usual. Exact key matches win. The fuzzy
+    fallback is conservative — same word count, trigger at least
+    _SNIPPET_MIN_FUZZY_LEN characters, ratio >= _FUZZY_CUTOFF (the threshold
+    restore_terms uses), and a unique winner: two snippets both close enough
+    means the take is ambiguous, and pasting the wrong block is worse than
+    pasting the words."""
+    if not text or not snippets:
+        return None
+    table: dict[str, tuple[str, str]] = {}
+    for trig, body in snippets.items():
+        k = snippet_key(trig)
+        if k and isinstance(body, str) and body.strip():
+            table.setdefault(k, (trig, body))
+    if not table:
+        return None
+    said = snippet_key(text)
+    if not said:
+        return None
+    candidates = [said]
+    for p in _SNIPPET_PREFIXES:
+        if said.startswith(p + " "):
+            candidates.append(said[len(p) + 1:])
+    for c in candidates:
+        if c in table:
+            return table[c]
+    if not fuzzy:
+        return None
+    scores: dict[str, float] = {}
+    matcher = SequenceMatcher(autojunk=False)
+    for c in candidates:
+        matcher.set_seq2(c)
+        n_words = c.count(" ") + 1
+        for k in table:
+            if len(k) < _SNIPPET_MIN_FUZZY_LEN or k.count(" ") + 1 != n_words:
+                continue
+            matcher.set_seq1(k)
+            if matcher.real_quick_ratio() < _FUZZY_CUTOFF:
+                continue
+            if matcher.quick_ratio() < _FUZZY_CUTOFF:
+                continue
+            score = matcher.ratio()
+            if score >= _FUZZY_CUTOFF:
+                scores[k] = max(scores.get(k, 0.0), score)
+    if len(scores) != 1:
+        return None
+    return table[next(iter(scores))]
