@@ -127,6 +127,11 @@ class Api:
                 # is read-only display (user overrides live in config.json)
                 "appStylesEnabled": c.get("app_styles_enabled", True),
                 "appStyles": app_styles.describe(c),
+                # "Мій стиль письма": the toggle is saved via save_settings,
+                # the profile itself is read-only here (rebuild_style_profile)
+                "styleProfileEnabled": c.get(
+                    "style_profile_enabled", flow.DEFAULTS["style_profile_enabled"]),
+                "styleProfile": self._style_profile_view(c.get("style_profile")),
             },
             "devices": flow.list_input_devices(),
             "models": flow.models_status(),
@@ -404,6 +409,11 @@ class Api:
         # read per take in _transcribe_impl, so no reload is needed. Missing key
         # (an older UI payload) keeps the feature on, matching DEFAULTS.
         c["app_styles_enabled"] = bool(s.get("appStylesEnabled", True))
+        # learned writing style: read per polish, no reload. A payload without
+        # the key (an older cached page) keeps the current value.
+        c["style_profile_enabled"] = bool(s.get(
+            "styleProfileEnabled",
+            c.get("style_profile_enabled", flow.DEFAULTS["style_profile_enabled"])))
         flow.save_config(c)
         flow.set_autostart(c["autostart"])
         # the pill bakes size and placement in when it is built, so it only
@@ -497,6 +507,31 @@ class Api:
                  "variants": [{"text": s, "count": n} for s, n in r["variants"]],
                  "total": r["total"], "examples": r["examples"]}
                 for r in found]
+
+    # ---- learned writing style ----
+    @staticmethod
+    def _style_profile_view(prof):
+        """What the Settings section shows: trait labels, when it was built,
+        from how many takes, and the exact text that goes to the AI (it is a
+        template, so showing it is the transparency the privacy note promises).
+        A missing/odd profile reads as "not built yet"."""
+        prof = prof if isinstance(prof, dict) else {}
+        traits = [{"id": str(t.get("id", "")), "label": str(t.get("label", ""))}
+                  for t in (prof.get("traits") or []) if isinstance(t, dict)]
+        return {"traits": traits, "builtAt": prof.get("built_at") or "",
+                "samples": int(prof.get("samples") or 0),
+                # the exact text appended to the polish prompt ("" = nothing)
+                "text": flow.style_profile_prompt(
+                    {"style_profile_enabled": True, "style_profile": prof})}
+
+    def rebuild_style_profile(self):
+        """Settings button "Оновити профіль". Runs on pywebview's worker thread
+        (~0.1 s); everything stays on this machine."""
+        prof = flow.rebuild_style_profile("manual")
+        if not prof:
+            return {"ok": False, "error": "Не вдалося порахувати профіль",
+                    **self._style_profile_view(flow.config.get("style_profile"))}
+        return {"ok": True, "error": "", **self._style_profile_view(prof)}
 
     # ---- history ----
     def history_copy(self, row_id):
