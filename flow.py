@@ -172,7 +172,7 @@ from faster_whisper import WhisperModel
 import text_fixes
 
 # ---------------- Config ----------------
-APP_VERSION = "1.4.7"  # single source of truth; build.ps1 feeds it to Inno
+APP_VERSION = "1.4.8"  # single source of truth; build.ps1 feeds it to Inno
 GITHUB_REPO = "kuubek5/kuubwave"  # public releases-only repo the updater polls
 # Cloudflare (in front of Groq) 403s urllib's default agent — send a browser one
 HTTP_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -2645,10 +2645,16 @@ def start_listener() -> "_Listeners":
             if spoke and lvl < floor:
                 silent_since = silent_since or time.time()
                 if time.time() - silent_since >= gap:
-                    log("hands-free: silence -> auto stop")
+                    log(f"hands-free: silence -> auto stop "
+                        f"(peak={peak:.4f} floor={floor:.4f})")
                     stop_rec()
                     return
-            else:
+            elif lvl > floor * 1.5:
+                # Only a CLEARLY voiced block resets the silence timer. On a quiet
+                # mic the level jitters right around `floor` after the user stops
+                # talking; treating every marginal blip as speech kept restarting
+                # the timer, so the take trailed for seconds. Blips within 1.5x of
+                # the floor no longer cancel a pending stop — the tail gets cut.
                 silent_since = None
             if time.time() - t_start >= hard_max:
                 log(f"hands-free: {hard_max}s cap -> auto stop")
