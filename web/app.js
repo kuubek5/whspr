@@ -41,6 +41,8 @@ const state = {
   stats: { wordsToday: 0, dictations: 0, wordsTotal: 0, wpm: 0 },
   recent: [], history: [],
   histQuery: "", histSel: 0, settingsTab: "general",
+  // dictionary suggestions from history: null until "Знайти проблемні слова"
+  suggestions: null, suggestionsFound: 0,
   // first-run onboarding. `onboarded` comes from bootstrap (defaults true, so an
   // existing user is never interrupted); `onb` is the live wizard state or null.
   onboarded: true, onb: null,
@@ -174,6 +176,20 @@ function mock(method, args) {
   if (method === "activate_license") return { ok: true, licensed: true, daysLeft: 30, exp: "2026-08-11", reason: "ok" };
   if (method === "save_settings") { console.log("[mock] save_settings", args[0]); return true; }
   if (method === "save_dictionary") { console.log("[mock] save_dictionary", args); return true; }
+  if (method === "suggest_dictionary_terms") {
+    // a promise, like the real bridge call; the real scan takes ~0.6 s
+    return new Promise((r) => setTimeout(() => r([
+      { term: "скачано-прошито", total: 14, examples: [], variants: [
+        { text: "скачано-прошитано", count: 3 }, { text: "просчитане", count: 3 },
+        { text: "скачано-просчитано", count: 2 }, { text: "скачане прочитане", count: 2 },
+        { text: "скачано-прощитано", count: 1 }, { text: "скачана-прошитана", count: 1 },
+        { text: "прощитана", count: 1 }, { text: "скачано-прощитено", count: 1 }] },
+      { term: "Moonraker", total: 7, examples: [], variants: [
+        { text: "мунрейкер", count: 4 }, { text: "Moonraker", count: 2 }, { text: "мунрекер", count: 1 }] },
+      { term: "OctoPrint", total: 4, examples: [], variants: [
+        { text: "OctoPrint", count: 2 }, { text: "октопринт", count: 1 }, { text: "актапринт", count: 1 }] },
+    ]), 500));
+  }
   if (method === "history_feed") return { stats: state.stats, recent: state.recent, history: state.history };
   if (method === "history_clear") { state.history = []; return true; }
   if (method === "history_delete" || method === "history_copy") return true;
@@ -773,6 +789,13 @@ function renderDictionary(el) {
       ${hnote("hlp-hotwords", "Хотворди — це рідкісні слова й терміни (назви, бренди, жаргон), які модель часто чує неправильно. Додайте їх сюди, і розпізнавання віддаватиме їм перевагу.")}
       <div class="hw-chips" id="hwchips"></div>
       <div class="hw-add">${svg(ICON.plus, 16)}<input id="hwadd" placeholder="Додати термін і натиснути Enter…" aria-label="Додати термін"></div>
+      <div class="sug">
+        <div class="sug-top">
+          <button class="btn ghost" id="sugFind">${svg(ICON.search, 15)}Знайти проблемні слова</button>
+          <span class="sug-hint">Шукає в історії слова, які модель щоразу пише по-різному</span>
+        </div>
+        <div class="sug-list" id="suglist" aria-live="polite"></div>
+      </div>
     </div>
     <div class="panel">
       <div class="dhead"><div class="di a">${svg(ICON.mic, 20)}</div><h2>Голосові команди</h2>
@@ -781,7 +804,8 @@ function renderDictionary(el) {
       <div class="cmd-list" id="cmdlist"></div>
     </div>
     <div class="dict-save"><button class="btn pri" id="dictSave">Зберегти</button></div>`;
-  drawHotwords(); drawCmds();
+  drawHotwords(); drawCmds(); drawSuggestions();
+  el.querySelector("#sugFind").onclick = findSuggestions;
   const add = el.querySelector("#hwadd");
   add.onkeydown = (e) => {
     if (e.key !== "Enter" && e.key !== ",") return;
@@ -819,6 +843,72 @@ function drawHotwords() {
   c.querySelectorAll(".x").forEach((b) => b.onclick = () => {
     const l = hwList(); l.splice(+b.dataset.i, 1);
     state.dictionary.hotwords = l.join(", "); drawHotwords();
+  });
+}
+// Ukrainian plural: 1 раз, 2–4 рази, 5–20 разів, 21 раз ...
+function ukPlural(n, one, few, many) {
+  const m10 = n % 10, m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return one;
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
+  return many;
+}
+// Suggestions live in state (null = never searched) so switching pages and back
+// keeps the list instead of silently dropping what the user has not decided yet.
+async function findSuggestions() {
+  const b = document.getElementById("sugFind");
+  if (b) { b.disabled = true; b.lastChild.textContent = "Шукаю…"; }
+  let res = [];
+  try { res = (await api("suggest_dictionary_terms")) || []; } catch (e) { res = []; }
+  state.suggestions = res; state.suggestionsFound = res.length;
+  const bb = document.getElementById("sugFind");
+  if (bb) { bb.disabled = false; bb.lastChild.textContent = "Знайти проблемні слова"; }
+  drawSuggestions();
+}
+function drawSuggestions() {
+  const l = document.getElementById("suglist"); if (!l) return;
+  const s = state.suggestions;
+  if (!s) { l.innerHTML = ""; return; }
+  if (!s.length) {
+    // "nothing found" and "you went through all of them" are different news
+    l.innerHTML = state.suggestionsFound
+      ? `<div class="dict-empty">Готово — усі пропозиції розглянуто</div>`
+      : `<div class="dict-empty">Проблемних слів не знайдено — модель пише ваші терміни стабільно</div>`;
+    return;
+  }
+  const MAXV = 6;
+  l.innerHTML = s.map((x, i) => {
+    const vs = x.variants || [];
+    const shown = vs.slice(0, MAXV).map((v) => `${esc(v.text)} <b>×${v.count}</b>`).join(" · ");
+    const more = vs.length > MAXV ? ` · ще ${vs.length - MAXV}` : "";
+    return `<div class="sug-row" data-i="${i}">
+      <div class="sug-main">
+        <input class="inp" value="${esc(x.term)}" aria-label="Як писати термін">
+        <div class="sug-vars">${vs.length} ${ukPlural(vs.length, "написання", "написання", "написань")}, ${x.total} ${ukPlural(x.total, "раз", "рази", "разів")}: ${shown}${more}</div>
+      </div>
+      <div class="sug-acts">
+        <button class="btn pri add">Додати</button>
+        <button class="btn ghost skip">Пропустити</button>
+      </div></div>`;
+  }).join("");
+  l.querySelectorAll(".sug-row").forEach((row) => {
+    const i = +row.dataset.i;
+    const inp = row.querySelector(".inp");
+    inp.oninput = () => (state.suggestions[i].term = inp.value);
+    row.querySelector(".skip").onclick = () => { state.suggestions.splice(i, 1); drawSuggestions(); };
+    row.querySelector(".add").onclick = async () => {
+      // commas would split the term into several hotwords on the next save
+      const v = inp.value.trim().replace(/,/g, " ").replace(/\s+/g, " ");
+      if (!v) { inp.focus(); return; }
+      const hw = hwList();
+      if (!hw.some((w) => w.toLowerCase() === v.toLowerCase())) {
+        hw.push(v); state.dictionary.hotwords = hw.join(", "); drawHotwords();
+      }
+      // saved at once: "Додати" reads as done, and the unsaved-chip state of
+      // the manual input field is easy to lose by leaving the page
+      await api("save_dictionary", state.dictionary.hotwords, state.dictionary.commands);
+      state.suggestions.splice(i, 1); drawSuggestions();
+      toast(`«${v}» додано до словника`);
+    };
   });
 }
 function drawCmds() {
