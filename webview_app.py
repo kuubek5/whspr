@@ -464,6 +464,25 @@ class Api:
             c["snippets_enabled"] = bool(enabled)
         flow.save_config(c)
         return True
+    def suggest_dictionary_terms(self):
+        """Terms the recogniser keeps spelling differently, mined from history.
+
+        pywebview already runs every js_api call on a worker thread, so this
+        never blocks the window; it takes ~0.6 s on a 2400-take history. The
+        whole history is read (capped), not the 200 rows the list shows: an
+        unstable term may only have been dictated a few times, months ago."""
+        import term_suggest
+        texts = [text for _id, _ts, _lang, _dur, text in flow.history_last(5000)]
+        try:
+            found = term_suggest.suggest_terms(
+                texts, flow.config.get("dictionary", ""))
+        except Exception as e:  # a bug here must not break the settings page
+            flow.log(f"suggest_dictionary_terms failed: {e}")
+            return []
+        return [{"term": r["term"],
+                 "variants": [{"text": s, "count": n} for s, n in r["variants"]],
+                 "total": r["total"], "examples": r["examples"]}
+                for r in found]
 
     # ---- history ----
     def history_copy(self, row_id):
