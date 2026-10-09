@@ -57,7 +57,7 @@ const state = {
               groqKeyVisible: false, spokenPunctuation: true, normalizeNumbers: true,
               voiceCommands: true, handsFree: false, llmPrompt: "", llmPromptDefault: "",
               // Smart Turn: stop a hands-free take as soon as the phrase sounds finished
-              smartTurn: true,
+              smartTurn: false,
               // per-app polish style: toggle is saved, appStyles is a read-only
               // [{id, label, hint, apps, web}] list from app_styles.describe()
               appStylesEnabled: true, appStyles: [],

@@ -204,7 +204,8 @@ class Selection(unittest.TestCase):
 
     def test_defaults(self):
         d = flow.DEFAULTS
-        self.assertIs(d["smart_turn"], True)
+        # opt-in until proven on a real mic (TTS cut-offs: 66% false "finished")
+        self.assertIs(d["smart_turn"], False)
         self.assertEqual(d["smart_turn_gap_s"], 0.6)
         self.assertEqual(d["smart_turn_threshold"], 0.5)
 

@@ -377,7 +377,10 @@ DEFAULTS = {
     # takes get cut mid-thought, switch this off. Downloaded
     # on first use into the same HF cache as the Whisper models; if it cannot be
     # fetched or loaded, hands-free behaves exactly as pure VAD.
-    "smart_turn": True,
+    # OFF by default: mid-sentence cuts are exactly the regression the VAD
+    # auto-stop was built to end, and that 66% figure is too risky to ship on.
+    # Opt in from Settings until it has been proven on the user's real mic.
+    "smart_turn": False,
     "smart_turn_gap_s": 0.6,   # silence before we ASK; never stops sooner
     "smart_turn_threshold": 0.5,
     # LLM post-processing: "off" | "groq" | "ollama"
@@ -2366,7 +2369,7 @@ def get_smart_turn(start_load: bool = True):
 
 
 def smart_turn_enabled() -> bool:
-    return bool(config.get("smart_turn", True)) and \
+    return bool(config.get("smart_turn", False)) and \
         str(config.get("autostop_engine", "vad")).lower() == "vad"
 
 
