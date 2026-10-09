@@ -2285,6 +2285,72 @@ def list_input_devices() -> list[dict]:
 _READ_CLIPBOARD = object()  # paste_text default: restore whatever is there now
 
 
+def choose_paste_target(start_hwnd, stop_hwnd, is_valid, is_ours):
+    """Which window a dictation take pastes into. Pure: the Win32 checks come in
+    as callables so this is unit-testable without a desktop.
+
+    The window focused when the take STARTED wins: that is where the user was
+    looking when they began talking. Taking it at the stop instead lost the text
+    whenever focus drifted mid-take — restoring KuubWave from the tray, a toast,
+    the overlay — and a hands-free take runs 10-60 s, so drift is the norm.
+    The start window is skipped when it is gone/minimized or is one of our own
+    windows (main UI, overlay): pasting into KuubWave itself is never intended.
+    Then the stop-time window is used — also our own or not, exactly as before,
+    so paste_text's "focus lost — text left in clipboard" path still covers the
+    case where neither is usable."""
+    if start_hwnd and is_valid(start_hwnd) and not is_ours(start_hwnd):
+        return start_hwnd
+    return stop_hwnd
+
+
+def _hwnd_pid(hwnd) -> int:
+    pid = ctypes.c_ulong(0)
+    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+    return pid.value
+
+
+def _hwnd_is_ours(hwnd) -> bool:
+    """Our own process owns it: pywebview main window, overlay pill, dialogs.
+    Matching the pid is robust where titles/classes are not (WebView2 child
+    windows, the window being renamed with the brand)."""
+    try:
+        return bool(hwnd) and _hwnd_pid(hwnd) == os.getpid()
+    except Exception:
+        return False
+
+
+def _hwnd_usable(hwnd) -> bool:
+    # a minimized window is excluded: SetForegroundWindow activates it without
+    # restoring it, and Ctrl+V into an invisible window is a silent loss
+    try:
+        return bool(hwnd) and bool(user32.IsWindow(hwnd)) \
+            and not user32.IsIconic(hwnd)
+    except Exception:
+        return False
+
+
+def _hwnd_label(hwnd) -> str:
+    exe, title = app_styles.window_app(hwnd)
+    title = title if len(title) <= 40 else title[:39] + "…"
+    return f"{exe or '?'}/{title!r}"
+
+
+def dictation_paste_target(start_hwnd):
+    """stop_rec's paste target for a dictation take: the start-time window if it
+    is still usable, else whatever is focused now (see choose_paste_target).
+    Logs only when the two differ, so a mis-paste report can be traced."""
+    stop_hwnd = user32.GetForegroundWindow()
+    hwnd = choose_paste_target(start_hwnd, stop_hwnd, _hwnd_usable, _hwnd_is_ours)
+    if start_hwnd and start_hwnd != stop_hwnd:
+        try:
+            log(f"paste target: start={_hwnd_label(start_hwnd)} "
+                f"stop={_hwnd_label(stop_hwnd)} -> using "
+                f"{'start' if hwnd == start_hwnd else 'stop'}")
+        except Exception:
+            pass
+    return hwnd
+
+
 def paste_text(text: str, target_hwnd: int, restore=_READ_CLIPBOARD) -> bool:
     """Paste `text` into target_hwnd via the clipboard, then put the clipboard
     back. `restore` is what goes back: by default the clipboard as it is right
@@ -3398,6 +3464,10 @@ def start_listener() -> "_Listeners":
         # it. A take still transcribing has already detached its own copy.
         with _buf_lock:
             chunks.clear()
+        # remember where the user was when they started talking: a dictation
+        # pastes THERE, even if focus wanders during the take (see
+        # dictation_paste_target). Command takes keep their own command_hwnd.
+        state["start_hwnd"] = user32.GetForegroundWindow()
         state["recording"] = True
         duck_others(True)
         set_status("recording")
@@ -3420,9 +3490,13 @@ def start_listener() -> "_Listeners":
         command = state.get("take_kind") == "command"
         state["take_kind"] = "dictate"
         # a command edits the window whose selection was there when the key
-        # went DOWN; a dictation pastes wherever focus is when it ends
-        hwnd = (state.get("command_hwnd") if command else None) \
-            or user32.GetForegroundWindow()
+        # went DOWN (unchanged); a dictation pastes into the window focused at
+        # its START, falling back to the current one (dictation_paste_target)
+        start_hwnd = state.pop("start_hwnd", None)
+        if command:
+            hwnd = state.get("command_hwnd") or user32.GetForegroundWindow()
+        else:
+            hwnd = dictation_paste_target(start_hwnd)
         threading.Thread(target=transcribe_and_paste,
                          args=(pre, cur, hwnd, command), daemon=True).start()
         if config.get("mic_on_demand"):
