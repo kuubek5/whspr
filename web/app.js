@@ -63,6 +63,8 @@ const state = {
               appStylesEnabled: true, appStyles: [],
               // voice editing of the selected text (flow.py command mode)
               commandMode: true,
+              // same key with nothing selected composes a message (flow.py run_scribe)
+              scribeEnabled: true,
               // ---- floating pill placement ----
               // overlayPosition is either one of the nine presets ("bottom-center")
               // or a free {x, y} in percent of the FREE space on each axis — exactly
@@ -1079,10 +1081,11 @@ function commandPanel() {
   const key = state.commandHotkey || "не призначено";
   return `<div class="panel"><h2>Голосове редагування</h2>
     ${toggleRow("Голосове редагування виділеного", "Виділіть текст у будь-якій програмі, натисніть клавішу нижче й скажіть, що зробити: «зроби ввічливіше», «скороти», «зроби списком», «переклади англійською»", "commandMode")}
+    ${toggleRow("Написати повідомлення (Scribe)", "Нічого не виділено → опишіть, що написати: «напиши Олегу, що зустріч переноситься на завтра» — вставиться готовий текст", "scribeEnabled")}
     ${noAi ? `<div class="cloud-warn" role="note" style="margin:10px 0 2px">${svg(ICON.warn, 15)}<span>Потрібен AI: увімкніть Groq або Ollama на вкладці «AI».</span></div>` : ""}
     <div class="hkwrap" style="margin-top:14px"><span class="keycap" id="cmdCap">${esc(key)}</span>
       <button class="btn ghost" id="cmdHotkeyBtn">Змінити</button></div>
-    <div class="hint" id="cmdHint" style="margin-top:14px">${s.handsFree ? "Тап — почати, пауза або ще один тап — виконати" : "Утримуйте, поки говорите інструкцію"}. Виділений текст буде замінено результатом</div></div>`;
+    <div class="hint" id="cmdHint" style="margin-top:14px">${s.handsFree ? "Тап — почати, пауза або ще один тап — виконати" : "Утримуйте, поки говорите інструкцію"}. Виділений текст буде замінено результатом${s.scribeEnabled ? "; без виділення — вставиться нове повідомлення. У терміналах не працює" : ""}</div></div>`;
 }
 
 function renderSettings(el) {

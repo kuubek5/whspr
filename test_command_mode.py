@@ -166,6 +166,9 @@ class RunSelectionCommand(unittest.TestCase):
         self.assertEqual(flow.state["last_output"]["text"], "Ввічливий текст.")
 
     def test_nothing_selected_does_nothing(self):
+        # with Scribe off this is the pre-Scribe behaviour exactly; with it on
+        # the take composes instead (test_scribe.py)
+        flow.config["scribe_enabled"] = False
         msg, ok = self.run_cmd(None)
         self.assertFalse(ok)
         self.assertEqual(msg, "нічого не виділено")
@@ -174,6 +177,7 @@ class RunSelectionCommand(unittest.TestCase):
         self.assertEqual(self.clip.copies, [])  # clipboard never written
 
     def test_app_copies_empty_string_restores(self):
+        flow.config["scribe_enabled"] = False
         msg, ok = self.run_cmd("")
         self.assertFalse(ok)
         self.assertEqual(self.clip.text, "мій буфер")

@@ -105,6 +105,8 @@ class Api:
                 # semantic end-of-turn on top of the VAD auto-stop (hands-free)
                 "smartTurn": c.get("smart_turn", False),
                 "commandMode": c.get("command_mode_enabled", True),
+                # same key, nothing selected -> compose a message (run_scribe)
+                "scribeEnabled": c.get("scribe_enabled", True),
                 "llm": c.get("llm", "off"),
                 "groqKey": c.get("groq_api_key", ""),
                 "groqModel": c.get("groq_model", ""),
@@ -377,6 +379,9 @@ class Api:
         # cached page) keeps the current value instead of switching it off.
         old_cmd = c.get("command_mode_enabled", True)
         c["command_mode_enabled"] = bool(s.get("commandMode", old_cmd))
+        # Scribe is read per take (run_selection_command), so no listener
+        # rebuild; a payload without the key keeps the current value
+        c["scribe_enabled"] = bool(s.get("scribeEnabled", c.get("scribe_enabled", True)))
         if s.get("llm") in ("off", "groq", "ollama"):
             c["llm"] = s["llm"]
         # blank model fields fall back to the shipped defaults rather than
