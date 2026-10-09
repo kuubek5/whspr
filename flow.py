@@ -174,6 +174,8 @@ from faster_whisper import WhisperModel
 # stack. PyInstaller needs it listed in packaging/kuubwave.spec.
 import text_fixes
 import app_styles
+# the user's own writing habits, learned on-device (pure, stdlib)
+import style_profile
 # per-take stage timing (pure, stdlib); one "latency:" log line per pasted take
 import latency
 
@@ -413,6 +415,29 @@ DEFAULTS = {
     # {"chat": "...instruction..."} laid over the built-in style texts; "" turns
     # that category's addition off. Config-file only for now.
     "style_prompts": {},
+    # "My writing style" (style_profile.py): a few abstract habits — «ти» vs
+    # «ви», short sentences, English terms in Latin, no "!" — counted LOCALLY
+    # over the history and appended to the polish prompt as template sentences.
+    # No history text ever goes into it (validated on build and on every read),
+    # and the history itself is never sent anywhere. {} = no profile yet, which
+    # makes the whole feature a no-op even with the toggle on.
+    # OFF by default, measured (2026-10-10, gpt-oss-20b/low, 28 + a second
+    # batch of the user's real raw takes, polish with vs without the profile):
+    # the with-profile output differed from the without one on 11 of 28, but
+    # the SAME prompt run twice differed on 10 of 28 — i.e. the profile's
+    # effect is inside run-to-run noise. The one directional gain was merged
+    # sentences (3 -> 0) with no new errors in any arm (no «ти» -> «ви», no
+    # Russian, no guard trips, no lost Latin terms). Not worth ~150 extra
+    # tokens on every polish of a free-tier key (the A/B itself tripped the
+    # 8000 tokens/min limit); the user can switch it on in Settings.
+    "style_profile_enabled": False,
+    # {"text", "traits": [{id, label}], "stats": {counts}, "samples",
+    #  "built_at": "YYYY-MM-DD HH:MM", "build_s"} — written by
+    # rebuild_style_profile(), never by hand
+    "style_profile": {},
+    # background rebuild at startup when the profile is older than this many
+    # days (~0.06 s on a 2.4k-take history); 0 = only the Settings button
+    "style_profile_auto_days": 7,
     "groq_api_key": "",
     "groq_model": "openai/gpt-oss-20b",
     # gpt-oss is a reasoning model: at Groq's default ("medium") it spent ~220
@@ -1209,6 +1234,83 @@ def _llm_request(system_prompt: str, user_text: str, label: str) -> str | None:
         return None
 
 
+def style_profile_prompt(cfg: dict | None = None) -> str:
+    """The user's learned style block for an LLM prompt, or "" when the
+    feature is off, no profile has been built, or the stored text fails the
+    privacy validator. Public on purpose: other prompt builders (e.g. Scribe)
+    look it up with getattr(flow, "style_profile_prompt") — keep the name and
+    signature. Never raises: a broken profile must cost the style hint, not the
+    dictation."""
+    try:
+        return style_profile.profile_prompt(config if cfg is None else cfg)
+    except Exception:
+        return ""
+
+
+def compose_polish_prompt(style: str | None = None) -> str:
+    """System prompt for one polish: base -> style profile -> per-app style.
+
+    Order matters. The base rules (custom llm_prompt or LLM_PROMPT) come first
+    and stay in charge. The user's habits come next and say outright that the
+    rules above and the per-app instruction below win. The per-app style goes
+    LAST, so on a conflict ("розмовно" for a chat vs. a habit learned mostly
+    from neat text) the more specific, closer-to-the-end instruction is the
+    one the model follows — and the profile text itself tells it so."""
+    # a non-empty llm_prompt in config overrides the built-in instruction, so
+    # the admin can tune the corrector from Settings without touching code; blank
+    # falls back to the shipped default (and picks up its future improvements).
+    prompt = (config.get("llm_prompt") or "").strip() or LLM_PROMPT
+    habits = style_profile_prompt(config)
+    if habits:
+        prompt = f"{prompt}\n\n{habits}"
+    # the per-app style is APPENDED, so the core rules above — custom or
+    # shipped — still govern; None/"default" leaves the prompt untouched
+    return app_styles.compose_prompt(prompt, style, config)
+
+
+_style_build_lock = threading.Lock()
+
+
+def rebuild_style_profile(reason: str = "manual") -> dict:
+    """Recount the user's writing habits from the local history and store the
+    result in config. Everything happens on this machine: the history is read
+    from history.db, reduced to counts, and only the template text derived
+    from those counts is kept (style_profile.build_profile validates it).
+
+    The log line names trait ids and counts only — never a text. Returns the
+    stored profile ({} on failure, leaving the previous profile in place)."""
+    with _style_build_lock:
+        try:
+            texts = [row[4] for row in history_last(style_profile.MAX_SAMPLES)]
+            prof = style_profile.build_profile(texts)
+        except Exception as e:
+            log(f"style profile build failed ({e.__class__.__name__})")
+            return {}
+        config["style_profile"] = prof
+        try:
+            save_config(config)
+        except Exception as e:
+            log(f"style profile save failed ({e.__class__.__name__})")
+        ids = ",".join(t["id"] for t in prof.get("traits", [])) or "none"
+        log(f"style profile rebuilt ({reason}): {prof.get('samples', 0)} takes, "
+            f"traits={ids}, {prof.get('build_s', 0):.2f}s")
+        return prof
+
+
+def maybe_rebuild_style_profile() -> None:
+    """Background refresh at startup, at most once per style_profile_auto_days.
+    Cheap (~0.06 s on 2.4k takes) but still off the boot path."""
+    try:
+        days = float(config.get("style_profile_auto_days",
+                                DEFAULTS["style_profile_auto_days"]) or 0)
+    except (TypeError, ValueError):
+        days = DEFAULTS["style_profile_auto_days"]
+    if days <= 0 or not style_profile.is_stale(config, days):
+        return
+    threading.Thread(target=rebuild_style_profile, args=("auto",),
+                     daemon=True).start()
+
+
 def llm_polish(text: str, lang: str, style: str | None = None) -> str:
     """Optional cleanup pass. Any failure returns the raw text.
 
@@ -1219,13 +1321,9 @@ def llm_polish(text: str, lang: str, style: str | None = None) -> str:
     fall back to the raw text when it looks like the model answered rather than
     corrected. The prompt hardening reduces how often this happens; the guard is
     what makes it safe when it happens anyway."""
-    # a non-empty llm_prompt in config overrides the built-in instruction, so
-    # the admin can tune the corrector from Settings without touching code; blank
-    # falls back to the shipped default (and picks up its future improvements).
-    prompt = (config.get("llm_prompt") or "").strip() or LLM_PROMPT
-    # the per-app style is APPENDED, so the core rules above — custom or
-    # shipped — still govern; None/"default" leaves the prompt untouched
-    prompt = app_styles.compose_prompt(prompt, style, config)
+    # base prompt + the user's learned habits + per-app style; see
+    # compose_polish_prompt for the order and why the per-app style wins
+    prompt = compose_polish_prompt(style)
     out = _llm_request(prompt, text, "polish")
     if not out:
         return text
@@ -4533,6 +4631,9 @@ def _start_core() -> None:
                 # and returns at once, so boot is never held up by the network
                 if _vad_model is not None and smart_turn_enabled():
                     get_smart_turn()
+            # refresh the learned writing style if it is older than
+            # style_profile_auto_days; runs on its own thread, local only
+            maybe_rebuild_style_profile()
         except Exception as e:
             log(f"model load failed ({e.__class__.__name__}: {e}) — "
                 f"dictation unavailable")

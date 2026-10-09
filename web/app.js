@@ -61,6 +61,11 @@ const state = {
               // per-app polish style: toggle is saved, appStyles is a read-only
               // [{id, label, hint, apps, web}] list from app_styles.describe()
               appStylesEnabled: true, appStyles: [],
+              // "Мій стиль письма": habits counted locally from history.
+              // styleProfile = {traits:[{id,label}], builtAt, samples, text}.
+              // Off by default (measured: no clear gain, see flow.DEFAULTS)
+              styleProfileEnabled: false,
+              styleProfile: { traits: [], builtAt: "", samples: 0, text: "" },
               // voice editing of the selected text (flow.py command mode)
               commandMode: true,
               // ---- floating pill placement ----
@@ -112,6 +117,15 @@ const MOCK_APP_STYLES = [
   { id: "code", label: "Код і термінал", hint: "Без перефразування — лише збої й пунктуація",
     apps: ["claude.exe", "cmd.exe", "code.exe", "cursor.exe", "pwsh.exe", "windowsterminal.exe"], web: [] },
 ];
+// trimmed copy of what Api._style_profile_view() returns, for the preview
+const MOCK_STYLE_PROFILE = {
+  traits: [{ id: "address_ty", label: "Пишете на «ти»" },
+           { id: "latin_terms", label: "Англійські терміни — латиницею" },
+           { id: "short_sent", label: "Короткі речення" },
+           { id: "no_exclaim", label: "Майже без знаків оклику" }],
+  builtAt: "2026-10-10 09:12", samples: 2037,
+  text: "Звички автора (лише не порушуй їх, текст під них не переписуй; правила вище та інструкція для програми нижче важливіші):\n- Автор звертається на «ти» — не міняй на «ви».\n- Короткі речення — не зливай їх у довгі.",
+};
 function mock(method, args) {
   if (method === "list_models") return MOCK_MODELS;
   if (method === "activate_model") {
@@ -151,7 +165,8 @@ function mock(method, args) {
       { id: 2, day: "Вчора", time: "19:20", lang: "uk", duration: "2.4с", text: "нагадати купити фотополімер для друку" },
       { id: 1, day: "12 вересня", time: "16:05", lang: "en", duration: "3.0с", text: "schedule the standup for tomorrow morning" },
     ],
-    settings: Object.assign({}, state.settings, { appStyles: MOCK_APP_STYLES }),
+    settings: Object.assign({}, state.settings, { appStyles: MOCK_APP_STYLES,
+                                                   styleProfile: MOCK_STYLE_PROFILE }),
     devices: [{ name: "Мікрофон (Realtek Audio)" }, { name: "Вхід (XONAR SOUND CARD)" },
               { name: "OnePlus 9R Hands-Free" }],
     models: MOCK_MODELS,
@@ -197,6 +212,10 @@ function mock(method, args) {
       { term: "OctoPrint", total: 4, examples: [], variants: [
         { text: "OctoPrint", count: 2 }, { text: "октопринт", count: 1 }, { text: "актапринт", count: 1 }] },
     ]), 500));
+  }
+  if (method === "rebuild_style_profile") {
+    return new Promise((r) => setTimeout(() => r(Object.assign({ ok: true, error: "" },
+      MOCK_STYLE_PROFILE, { builtAt: new Date().toISOString().slice(0, 16).replace("T", " ") })), 300));
   }
   if (method === "history_feed") return { stats: state.stats, recent: state.recent, history: state.history };
   if (method === "history_clear") { state.history = []; return true; }
@@ -1063,6 +1082,37 @@ function appStylesListHtml() {
       <div class="apps mono">${esc(apps.join(", ") || "—")}${esc(web)}</div></div>`;
   }).join("");
 }
+// "Мій стиль письма": the learned habits as chips, when/how it was built, and
+// the exact text the AI receives (folded) — it is a template, never user text.
+function styleTraitsHtml() {
+  const p = state.settings.styleProfile || {};
+  const tr = p.traits || [];
+  if (!tr.length) {
+    return `<div class="trait-empty">${p.builtAt
+      ? "Поки замало диктовок, щоб упевнено щось сказати про стиль — профіль порожній і ні на що не впливає"
+      : "Профіль ще не пораховано — натисніть «Оновити профіль»"}</div>`;
+  }
+  return tr.map((t) => `<span class="trait">${esc(t.label)}</span>`).join("");
+}
+function styleMetaText() {
+  const p = state.settings.styleProfile || {};
+  if (!p.builtAt) return "Ще не оновлювався";
+  return `Оновлено ${esc(p.builtAt)} · з ${Number(p.samples || 0)} диктовок`;
+}
+function styleProfileHtml() {
+  const s = state.settings, p = s.styleProfile || {};
+  return `<div id="styleProfileBlock" style="margin-top:15px;border-top:1px solid var(--line)">
+    ${toggleRow("Мій стиль письма", "AI зберігає ваші звички — «ти» чи «ви», довжину речень, терміни латиницею. Експериментально: різниця невелика, трохи більше токенів на кожну диктовку", "styleProfileEnabled",
+      ["hlp-styleprofile", "KuubWave рахує на цьому комп'ютері кілька загальних звичок із вашої історії диктовок і додає їх до інструкції як короткі правила. Самі тексти, імена чи цифри з історії нікуди не йдуть і в правила не потрапляють. Оновлюється сам раз на тиждень."])}
+    <div class="sp-wrap" id="spWrap"${s.styleProfileEnabled ? "" : " hidden"}>
+      <div class="trait-list" id="spTraits">${styleTraitsHtml()}</div>
+      <div class="note ok" style="margin-top:8px">${svg(ICON.shield, 15)}<span>Профіль рахується на цьому комп'ютері; у хмару йдуть лише ці загальні правила, не ваші тексти</span></div>
+      <div class="sp-foot"><span class="sp-meta" id="spMeta">${styleMetaText()}</span>
+        <button class="btn ghost" id="spRebuild" style="padding:8px 13px;font-size:12px">Оновити профіль</button></div>
+      <details class="sp-text" id="spTextBox"${p.text ? "" : " hidden"}><summary>Що саме отримує AI</summary>
+        <pre id="spText">${esc(p.text || "")}</pre></details>
+    </div></div>`;
+}
 function toggleRow(label, hint, key, help) {
   const on = state.settings[key];
   return `<div class="srow"><div style="min-width:0">
@@ -1184,7 +1234,8 @@ function renderSettings(el) {
           ${toggleRow("Стиль під програму", "AI підлаштовує тон під вікно, куди йде текст. Інші програми — як зараз", "appStylesEnabled",
             ["hlp-appstyles", "KuubWave дивиться, в яку програму вставляється текст, і додає до інструкції коротку підказку: у месенджері — розмовно, у пошті — акуратно, у коді й терміналі — нічого не перефразовувати. Ваша інструкція вище лишається основною."])}
           <div class="style-list" id="appStylesList"${s.appStylesEnabled ? "" : " hidden"}>${appStylesListHtml()}</div>
-        </div></div>`,
+        </div>
+        ${styleProfileHtml()}</div>`,
     license: `
       <div class="panel"><h2>Ліцензія</h2>
         <div class="desc">Ключ активується один раз і зберігається на цьому пристрої</div>
@@ -1341,6 +1392,8 @@ function bindAiPane(el) {
     el.querySelector("#llmPromptBlock").style.display = s.llm === "off" ? "none" : "";
     // the per-app style only shapes the polish prompt, so it goes with it
     el.querySelector("#appStylesBlock").style.display = s.llm === "off" ? "none" : "";
+    // the learned style is also only a polish-prompt addition
+    el.querySelector("#styleProfileBlock").style.display = s.llm === "off" ? "none" : "";
     el.querySelectorAll(".seg [data-llm]").forEach((b) => {
       const on = b.dataset.llm === s.llm;
       b.classList.toggle("on", on);
@@ -1353,6 +1406,27 @@ function bindAiPane(el) {
   const stTg = el.querySelector('.tg[data-key="appStylesEnabled"]');
   const stSave = stTg.onclick;
   stTg.onclick = () => { stSave(); el.querySelector("#appStylesList").hidden = !s.appStylesEnabled; };
+  const spTg = el.querySelector('.tg[data-key="styleProfileEnabled"]');
+  const spSave = spTg.onclick;
+  spTg.onclick = () => { spSave(); el.querySelector("#spWrap").hidden = !s.styleProfileEnabled; };
+  const spBtn = el.querySelector("#spRebuild");
+  spBtn.onclick = async () => {
+    spBtn.disabled = true;
+    const was = spBtn.textContent;
+    spBtn.textContent = "Рахую…";
+    let res = null;
+    try { res = await api("rebuild_style_profile"); } catch (e) { res = null; }
+    spBtn.disabled = false;
+    spBtn.textContent = was;
+    if (!res || !res.ok) { toast((res && res.error) || "Не вдалося оновити профіль"); return; }
+    s.styleProfile = { traits: res.traits || [], builtAt: res.builtAt || "",
+                       samples: res.samples || 0, text: res.text || "" };
+    el.querySelector("#spTraits").innerHTML = styleTraitsHtml();
+    el.querySelector("#spMeta").textContent = styleMetaText();
+    el.querySelector("#spText").textContent = s.styleProfile.text;
+    el.querySelector("#spTextBox").hidden = !s.styleProfile.text;
+    toast("Профіль стилю оновлено");
+  };
   const setLlm =(v) => { s.llm = v; syncLlm(); saveSettings(); };
   el.querySelectorAll(".seg [data-llm]").forEach((b) => b.onclick = () => {
     const v = b.dataset.llm;
