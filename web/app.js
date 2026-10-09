@@ -20,6 +20,7 @@ const ICON = {
   trash: '<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>',
   plus: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
   x: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
+  download: '<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 19h16"/>',
   warn: '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
   shield: '<path d="M12 2 4 5v6c0 5 3.5 8.5 8 11 4.5-2.5 8-6 8-11V5l-8-3Z"/>',
   upd: '<path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/>',
@@ -360,7 +361,7 @@ function renderHome(el) {
       <div class="ico">${svg(ICON.upd, 17)}</div>
       <div class="bt"><div class="tt">Доступне оновлення v${esc(state.update.version)}</div>
         <div class="bb">Застосунок перезапуститься після встановлення</div></div>
-      <button class="btn pri" style="padding:8px 14px" id="updBtn">Оновити</button></div>` : ""}
+      <button class="btn pri sm" id="updBtn">Оновити</button></div>` : ""}
     <div class="hero" id="hero">
       <span class="blob b1" aria-hidden="true"></span><span class="blob b2" aria-hidden="true"></span>
       <div class="hero-in" id="heroCenter"></div>
@@ -373,8 +374,8 @@ function renderHome(el) {
     </div>
     <div class="sechead"><h2>Останні диктовки</h2>${state.history.length ? `<button class="lnk" id="allHist">Уся історія →</button>` : ""}</div>
     ${state.recent && state.recent.length ? `<div class="recent">${state.recent.slice(0, 4).map((r) => `
-      <div class="rc"><div class="av">${svg(ICON.check, 18)}</div>
-        <div class="tx"><div class="t">${esc(r.text)}</div><div class="m mono">${esc(r.time)}</div></div></div>`).join("")}</div>`
+      <button class="rc" type="button" data-t="${esc(r.text)}" aria-label="Відкрити в історії: ${esc(r.text)}"><div class="av">${svg(ICON.check, 18)}</div>
+        <div class="tx"><div class="t">${esc(r.text)}</div><div class="m mono">${esc(r.time)}</div></div></button>`).join("")}</div>`
       : emptyBlock(ICON.mic, "Ще жодної диктовки", `Затисніть ${state.hotkey} і скажіть кілька слів — ваша перша диктовка зʼявиться тут.`)}`;
   micWarnKey = null;  // fresh slot node — force a paint into it
   renderMicWarning();
@@ -384,6 +385,14 @@ function renderHome(el) {
   if (ub) ub.onclick = doInstallUpdate;
   const ah = el.querySelector("#allHist");
   if (ah) ah.onclick = () => goto("history");
+  // a recent row opens that very dictation in History (matched by text — the
+  // recent feed carries no ids), so the card's hover lift keeps its promise
+  el.querySelectorAll(".rc[data-t]").forEach((c) => c.onclick = () => {
+    state.histQuery = "";
+    const i = (state.history || []).findIndex((h) => h.text === c.dataset.t);
+    state.histSel = i >= 0 ? i : 0;
+    goto("history");
+  });
   void s;
 }
 function heroTitle() {
@@ -594,8 +603,8 @@ function renderMicWarning() {
     <div class="ico">${svg(ICON.warn, 17)}</div>
     <div class="bt"><div class="tt">Мікрофон записує надто тихо</div>
       <div class="bb" id="micWarnBody">${esc(body)}</div></div>
-    ${canFix && !state.micWarnMsg ? `<button class="btn ghost" style="padding:8px 14px" id="micFixBtn">Підняти рівень</button>` : ""}
-    <button class="x" id="micWarnX" aria-label="Приховати">✕</button>
+    ${canFix && !state.micWarnMsg ? `<button class="btn ghost sm" id="micFixBtn">Підняти рівень</button>` : ""}
+    <button class="x" id="micWarnX" aria-label="Приховати">${svg(ICON.x, 15)}</button>
   </div>`;
   slot.querySelector("#micWarnX").onclick = () => {
     state.micWarnDismissed = true; renderMicWarning();
@@ -681,7 +690,7 @@ function renderHistory(el) {
       <div class="hist-col">
         <div class="hist-search">${svg(ICON.search, 16)}
           <input id="hsearch" placeholder="Пошук у диктовках…" value="${esc(state.histQuery)}" aria-label="Пошук у диктовках">
-          <button class="clr ${state.histQuery ? "show" : ""}" id="hclr" aria-label="Очистити пошук">✕</button></div>
+          <button class="clr ${state.histQuery ? "show" : ""}" id="hclr" aria-label="Очистити пошук">${svg(ICON.x, 14)}</button></div>
         <div class="hist-list" id="hlist" role="listbox" tabindex="0" aria-label="Диктовки"></div>
       </div>
       <div class="hist-detail" id="hdetail"></div>
@@ -813,16 +822,17 @@ function renderDictionary(el) {
     </div>
     <div class="panel">
       <div class="dhead"><div class="di a">${svg(ICON.mic, 20)}</div><h2>Голосові команди</h2>
-        <button class="addbtn" id="cmdAdd">${svg(ICON.plus, 14)}Додати</button></div>
+        <div class="acts"><button class="addbtn" id="cmdAdd">${svg(ICON.plus, 14)}Додати</button></div></div>
       <div class="desc">Промовте фразу зліва — KuubWave вставить символ праворуч. Наприклад: «нова думка» = ⏎</div>
       <div class="cmd-list" id="cmdlist"></div>
     </div>
     <div class="panel">
       <div class="dhead"><div class="di c">${svg(ICON.dictionary, 20)}</div>
         <h2 class="lab-h">Сніпети${hbtn("hlp-snippets")}</h2>
-        <button class="addbtn" id="snipAdd">${svg(ICON.plus, 14)}Додати</button>
-        <button class="tg ${state.dictionary.snippetsEnabled ? "on" : ""}" role="switch" id="snipOn"
-          aria-checked="${state.dictionary.snippetsEnabled ? "true" : "false"}" aria-label="Увімкнути сніпети"><span class="th"></span></button></div>
+        <div class="acts">
+          <button class="tg ${state.dictionary.snippetsEnabled ? "on" : ""}" role="switch" id="snipOn"
+            aria-checked="${state.dictionary.snippetsEnabled ? "true" : "false"}" aria-label="Увімкнути сніпети"><span class="th"></span></button>
+          <button class="addbtn" id="snipAdd">${svg(ICON.plus, 14)}Додати</button></div></div>
       <div class="desc">Скажіть лише фразу — KuubWave вставить збережений текст без змін. Наприклад: «мій підпис» → ваш підпис</div>
       ${hnote("hlp-snippets", "Сніпет спрацьовує, тільки коли вся диктовка — це його фраза (можна з «вставити» на початку). Якщо фраза прозвучить посеред речення, текст надиктується як звичайно. Текст сніпета вставляється дослівно: з усіма рядками, без AI-полірування й автозамін. Після вставки «видали це» прибере його.")}
       <div class="snip-list" id="sniplist"></div>
@@ -896,7 +906,7 @@ function drawHotwords() {
   const cnt = document.getElementById("hwCnt");
   if (cnt) cnt.textContent = `${hw.length} термінів`;
   if (!hw.length) { c.innerHTML = `<div class="dict-empty" style="width:100%">Ще немає термінів</div>`; return; }
-  c.innerHTML = hw.map((w, i) => `<span class="hw-chip">${esc(w)}<button class="x" data-i="${i}" aria-label="Видалити ${esc(w)}">✕</button></span>`).join("");
+  c.innerHTML = hw.map((w, i) => `<span class="hw-chip">${esc(w)}<button class="x" data-i="${i}" aria-label="Видалити ${esc(w)}">${svg(ICON.x, 12)}</button></span>`).join("");
   c.querySelectorAll(".x").forEach((b) => b.onclick = () => {
     const l = hwList(); l.splice(+b.dataset.i, 1);
     state.dictionary.hotwords = l.join(", "); drawHotwords();
@@ -943,8 +953,8 @@ function drawSuggestions() {
         <div class="sug-vars">${vs.length} ${ukPlural(vs.length, "написання", "написання", "написань")}, ${x.total} ${ukPlural(x.total, "раз", "рази", "разів")}: ${shown}${more}</div>
       </div>
       <div class="sug-acts">
-        <button class="btn pri add">Додати</button>
-        <button class="btn ghost skip">Пропустити</button>
+        <button class="btn pri sm add">Додати</button>
+        <button class="btn ghost sm skip">Пропустити</button>
       </div></div>`;
   }).join("");
   l.querySelectorAll(".sug-row").forEach((row) => {
@@ -1067,7 +1077,7 @@ function appStylesListHtml() {
 }
 function toggleRow(label, hint, key, help) {
   const on = state.settings[key];
-  return `<div class="srow"><div style="min-width:0">
+  return `<div class="srow"><div class="sl">
       <div class="lab lab-h">${label}${help ? hbtn(help[0]) : ""}</div>
       <div class="hint">${hint}</div>${help ? hnote(help[0], help[1]) : ""}</div>
     <button class="tg ${on ? "on" : ""}" role="switch" aria-checked="${on ? "true" : "false"}"
@@ -1083,9 +1093,9 @@ function commandPanel() {
     ${toggleRow("Голосове редагування виділеного", "Виділіть текст у будь-якій програмі, натисніть клавішу нижче й скажіть, що зробити: «зроби ввічливіше», «скороти», «зроби списком», «переклади англійською»", "commandMode")}
     ${toggleRow("Написати повідомлення (Scribe)", "Нічого не виділено → опишіть, що написати: «напиши Олегу, що зустріч переноситься на завтра» — вставиться готовий текст", "scribeEnabled")}
     ${noAi ? `<div class="cloud-warn" role="note" style="margin:10px 0 2px">${svg(ICON.warn, 15)}<span>Потрібен AI: увімкніть Groq або Ollama на вкладці «AI».</span></div>` : ""}
-    <div class="hkwrap" style="margin-top:14px"><span class="keycap" id="cmdCap">${esc(key)}</span>
+    <div class="hkwrap gt"><span class="keycap" id="cmdCap">${esc(key)}</span>
       <button class="btn ghost" id="cmdHotkeyBtn">Змінити</button></div>
-    <div class="hint" id="cmdHint" style="margin-top:14px">${s.handsFree ? "Тап — почати, пауза або ще один тап — виконати" : "Утримуйте, поки говорите інструкцію"}. Виділений текст буде замінено результатом${s.scribeEnabled ? "; без виділення — вставиться нове повідомлення. У терміналах не працює" : ""}</div></div>`;
+    <div class="hint gt" id="cmdHint">${s.handsFree ? "Тап — почати, пауза або ще один тап — виконати" : "Утримуйте, поки говорите інструкцію"}. Виділений текст буде замінено результатом${s.scribeEnabled ? "; без виділення — вставиться нове повідомлення. У терміналах не працює" : ""}</div></div>`;
 }
 
 function renderSettings(el) {
@@ -1104,17 +1114,17 @@ function renderSettings(el) {
       <div class="panel"><h2>Гаряча клавіша</h2>
         <div class="hkwrap"><span class="keycap" id="hkCap">${esc(state.hotkey)}</span>
           <button class="btn ghost" id="hotkeyBtn">Змінити</button></div>
-        <div class="hint" style="margin-top:14px">Утримувати для диктування — натисніть «Змінити» та виконайте потрібну комбінацію</div></div>
+        <div class="hint gt">Утримувати для диктування — натисніть «Змінити» та виконайте потрібну комбінацію</div></div>
       ${commandPanel()}
       <div class="panel"><h2>Оновлення</h2>
-        <div class="srow"><div style="min-width:0">
+        <div class="srow"><div class="sl">
             <div class="lab">Версія ${state.version ? "v" + esc(state.version) : "—"}</div>
             <div class="hint">KuubWave перевіряє оновлення сам при запуску й пропонує встановити нову версію</div></div>
           <button class="btn ghost" id="chkUpdBtn">Перевірити оновлення</button></div></div>`,
     floating: floatingPanel(),
     mic: `
       <div class="panel"><h2>Мікрофон</h2>
-        <div class="srow"><div style="min-width:0"><div class="lab">Пристрій вводу</div><div class="hint">Джерело звуку для диктування</div></div>
+        <div class="srow"><div class="sl"><div class="lab">Пристрій вводу</div><div class="hint">Джерело звуку для диктування</div></div>
           <select class="sel" id="selMic" aria-label="Пристрій вводу"></select></div>
         ${toggleRow("Відкривати мікрофон лише під час запису", "Прибирає значок мікрофона в треї; можливе зрізання перших мілісекунд фрази", "micOnDemand")}
         ${toggleRow("Глушити інші звуки під час запису", "Музика, відео та сповіщення стихають, поки ви диктуєте, і вмикаються назад після відпускання клавіші", "muteOthers")}
@@ -1132,7 +1142,7 @@ function renderSettings(el) {
           ${sttModeCard("cloud", "Хмара", ICON.cloud, "Швидко · без GPU · свій ключ")}
         </div>
         <div id="sttLocal"${s.sttBackend === "cloud" ? " hidden" : ""}>
-          <div class="srow" style="margin-top:14px"><div style="min-width:0">
+          <div class="srow gt"><div class="sl">
               <div class="lab lab-h">Рушій${hbtn("hlp-engine")}</div>
               <div class="hint" id="engHint"></div>
               ${hnote("hlp-engine", "Whisper — перевірений рушій з українською донавченою моделлю, словником-підказками й захистом від русизмів. Parakeet (NVIDIA) — у кілька разів швидший за точності, близької до Whisper; словник-підказки на нього не діють, але виправлення термінів зі словника після розпізнавання працює. Якщо Parakeet недоступний — диктовка сама піде через Whisper.")}</div>
@@ -1140,13 +1150,13 @@ function renderSettings(el) {
               <button data-eng="whisper">Whisper</button>
               <button data-eng="parakeet">Parakeet</button></div></div>
           <div id="engPk"></div>
-          <div class="mcards" id="mcards" role="radiogroup" aria-label="Модель розпізнавання" style="margin-top:14px"></div>
-          <div class="srow" style="margin-top:6px"><div style="min-width:0"><div class="lab">Пристрій обробки</div>
+          <div class="mcards gt" id="mcards" role="radiogroup" aria-label="Модель розпізнавання"></div>
+          <div class="srow" style="margin-top:6px"><div class="sl"><div class="lab">Пристрій обробки</div>
               <div class="hint">Де рахувати модель: GPU швидко, CPU повільний запасний. Уся обробка локально</div></div>
             <select class="sel" id="selGpu" aria-label="Пристрій обробки">
               <option value="cuda">${esc(state.gpu)} (GPU)</option>
               <option value="cpu">CPU (запасний варіант)</option></select></div></div>
-        <div id="sttCloud"${s.sttBackend === "local" ? " hidden" : ""} style="margin-top:14px">${sttCloudHtml()}</div>
+        <div id="sttCloud" class="gt"${s.sttBackend === "local" ? " hidden" : ""}>${sttCloudHtml()}</div>
       </div>`,
     ai: `
       <div class="panel"><h2>Мова та пунктуація</h2>
@@ -1156,34 +1166,34 @@ function renderSettings(el) {
       <div class="panel"><h2>Полірування тексту (AI)</h2>
         <div class="desc">Прибирає слова-паразити, розставляє пунктуацію. Виконується після розпізнавання</div>
         <div class="cloud-warn" role="note" style="margin:2px 0 6px">${svg(ICON.warn, 15)}<span>У режимі Groq текст диктовок іде на сервери Groq для полірування. Ollama — локально.</span></div>
-        <div class="srow"><div style="min-width:0"><div class="lab lab-h">Режим${hbtn("hlp-ai")}</div>
+        <div class="srow"><div class="sl"><div class="lab lab-h">Режим${hbtn("hlp-ai")}</div>
             <div class="hint">Ollama — локально й безкоштовно. Groq — швидко, але текст іде на чужий сервер</div>
             ${hnote("hlp-ai", "Ollama працює просто на вашому ПК — безкоштовно й приватно, текст нікуди не йде. Groq — це хмара: швидше й якісніше, але кожна диктовка вирушає на сервери Groq.")}</div>
           <div class="seg" role="group" aria-label="Режим полірування">
             <button data-llm="off" class="${s.llm === "off" ? "on" : ""}" aria-pressed="${s.llm === "off"}">Вимкнено</button>
             <button data-llm="ollama" class="${s.llm === "ollama" ? "on" : ""}" aria-pressed="${s.llm === "ollama"}">Ollama</button>
             <button data-llm="groq" class="${s.llm === "groq" ? "on" : ""}" aria-pressed="${s.llm === "groq"}">Groq</button></div></div>
-        <div id="llmOllama" class="srow"><div style="min-width:0"><div class="lab">Модель Ollama</div>
+        <div id="llmOllama" class="srow"><div class="sl"><div class="lab">Модель Ollama</div>
             <div class="hint">Має бути завантажена: <span class="mono">ollama pull ${esc(s.ollamaModel || "qwen2.5:7b")}</span></div></div>
           <input class="inp mono" id="ollamaModel" value="${esc(s.ollamaModel || "")}" placeholder="qwen2.5:7b" aria-label="Модель Ollama"></div>
         <div id="llmGroq">
-          <div class="srow"><div style="min-width:0"><div class="lab">Ключ Groq API</div>
+          <div class="srow"><div class="sl"><div class="lab">Ключ Groq API</div>
               <div class="hint">Безкоштовний тариф на console.groq.com</div></div>
             <div class="key-wrap">
               <input class="inp mono" id="groqKey" type="password" value="${esc(s.groqKey || "")}" placeholder="gsk_…" aria-label="Ключ Groq API">
               <button class="mini" id="keyEye" aria-label="Показати ключ"></button></div></div>
-          <div class="srow"><div style="min-width:0"><div class="lab">Модель Groq</div>
+          <div class="srow"><div class="sl"><div class="lab">Модель Groq</div>
               <div class="hint">openai/gpt-oss-20b — швидка й безкоштовна. Список: console.groq.com/docs/models</div></div>
             <input class="inp mono" id="groqModel" value="${esc(s.groqModel || "")}" placeholder="openai/gpt-oss-20b" aria-label="Модель Groq"></div>
         </div>
-        <div id="llmPromptBlock" style="padding-top:15px;border-top:1px solid var(--line)">
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;flex-wrap:wrap">
-            <div><div class="lab">Інструкція для полірування</div>
+        <div id="llmPromptBlock" class="sep">
+          <div class="subhead">
+            <div class="sl"><div class="lab">Інструкція для полірування</div>
               <div class="hint">Що саме AI робить з розпізнаним текстом. Порожнє — типова інструкція</div></div>
-            <button class="btn ghost" id="llmPromptReset" style="padding:8px 13px;font-size:12px">Скинути до типового</button></div>
+            <button class="btn ghost sm" id="llmPromptReset">Скинути до типового</button></div>
           <textarea class="ta mono" id="llmPrompt" rows="5" placeholder="Типова інструкція" aria-label="Інструкція для полірування">${esc(s.llmPrompt || s.llmPromptDefault || "")}</textarea>
         </div>
-        <div id="appStylesBlock" style="margin-top:15px;border-top:1px solid var(--line)">
+        <div id="appStylesBlock" class="sep gt">
           ${toggleRow("Стиль під програму", "AI підлаштовує тон під вікно, куди йде текст. Інші програми — як зараз", "appStylesEnabled",
             ["hlp-appstyles", "KuubWave дивиться, в яку програму вставляється текст, і додає до інструкції коротку підказку: у месенджері — розмовно, у пошті — акуратно, у коді й терміналі — нічого не перефразовувати. Ваша інструкція вище лишається основною."])}
           <div class="style-list" id="appStylesList"${s.appStylesEnabled ? "" : " hidden"}>${appStylesListHtml()}</div>
@@ -1200,7 +1210,7 @@ function renderSettings(el) {
       <div class="panel"><h2>Приватність</h2>
         <div class="note ${s.llm === "groq" ? "warn" : "ok"}" id="privacyNote"></div></div>
       <div class="panel"><h2>Знайомство</h2>
-        <div class="srow" style="border:none;padding-bottom:0"><div style="min-width:0">
+        <div class="srow" style="border:none;padding-bottom:0"><div class="sl">
             <div class="lab">Пройти знайомство</div>
             <div class="hint">Показати вступний тур ще раз — крок за кроком. Не змінює ваших налаштувань.</div></div>
           <button class="btn ghost" id="obReplay">Пройти знайомство</button></div></div>`,
@@ -1229,12 +1239,24 @@ function renderSettings(el) {
     };
   });
 
+  // Smart Turn only does anything in hands-free mode: with hands-free off the
+  // row reads as dependent (dimmed, inert) instead of saving a no-op change.
+  const syncDependents = () => {
+    const st = el.querySelector('.tg[data-key="smartTurn"]');
+    if (!st) return;
+    const dep = !s.handsFree;
+    st.closest(".srow").classList.toggle("off", dep);
+    st.setAttribute("aria-disabled", dep ? "true" : "false");
+  };
+  syncDependents();
   // every toggle in every pane goes through the same save_settings payload
   el.querySelectorAll(".tg[data-key]").forEach((t) => t.onclick = () => {
     const k = t.dataset.key;
+    if (t.getAttribute("aria-disabled") === "true") return;
     s[k] = !s[k];
     t.classList.toggle("on", s[k]);
     t.setAttribute("aria-checked", s[k] ? "true" : "false");
+    if (k === "handsFree") syncDependents();
     saveSettings();
   });
 
@@ -1480,7 +1502,7 @@ function enginePkHtml() {
     return `<div class="note warn" style="margin-top:6px">${svg(ICON.warn, 15)}У цій збірці немає Parakeet — диктовка йде через Whisper</div>`;
   }
   if (p.installed) return "";
-  return `<div class="srow"><div style="min-width:0"><div class="lab">Модель Parakeet не завантажена</div>
+  return `<div class="srow"><div class="sl"><div class="lab">Модель Parakeet не завантажена</div>
       <div class="hint" id="pkDlTx">Завантаження · ${esc(p.size || "")}. Поки її немає, диктовка йде через Whisper</div></div>
     <button class="btn ghost" id="pkDl">Завантажити</button></div>`;
 }
@@ -1565,7 +1587,7 @@ function renderModelList(host) {
     const tags = [m.en ? "тільки англійська" : "", m.note].filter(Boolean).map(esc).join(" · ");
     let bottom = "";
     if (m.installed && !m.active) bottom = `<button class="mdel" data-act="del" data-id="${esc(m.id)}">${svg(ICON.trash, 12)}Видалити з диска</button>`;
-    else if (!m.installed) bottom = `<div class="dl">↓ Завантажити</div>`;
+    else if (!m.installed) bottom = `<div class="dl">${svg(ICON.download, 12)}Завантажити</div>`;
     const status = m.active ? "Активна" : (m.installed ? "на диску" : "не завантажена");
     return `<div class="mcard${m.active ? " on" : ""}" role="radio" aria-checked="${m.active ? "true" : "false"}"
       aria-label="${esc(m.label)} — ${status}" tabindex="${i === focusIdx ? 0 : -1}" data-mid="${esc(m.id)}">
@@ -1817,7 +1839,7 @@ function floatingPanel() {
   }).join("");
   return `<div class="panel"><h2>Плаваюча панель</h2>
     <div class="desc">Маленький індикатор запису, який лежить поверх усіх вікон, поки ви диктуєте</div>
-    <div class="srow" style="padding-top:0"><div style="min-width:0">
+    <div class="srow" style="padding-top:0"><div class="sl">
         <div class="lab">Показувати панель</div><div class="hint">Індикатор запису поверх усіх вікон</div></div>
       <button class="tg ${s.floatingPanel ? "on" : ""}" role="switch" aria-checked="${s.floatingPanel ? "true" : "false"}"
         aria-label="Показувати плаваючу панель" aria-controls="fpBody" id="fpMaster"><span class="th"></span></button></div>
