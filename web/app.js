@@ -36,7 +36,7 @@ const svg = (p, s = 19) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" 
 
 const state = {
   theme: "dark", page: "home", homeState: "idle", recordSecs: 0,
-  gpu: "…", hotkey: "Fn", listening: false, version: "", update: { available: false },
+  gpu: "…", hotkey: "Fn", commandHotkey: "", listening: false, version: "", update: { available: false },
   license: { licensed: true, daysLeft: 0, exp: "", reason: "ok", customer: "" },
   stats: { wordsToday: 0, dictations: 0, wordsTotal: 0, wpm: 0 },
   recent: [], history: [],
@@ -54,6 +54,8 @@ const state = {
               llm: "off", groqKey: "", groqModel: "", ollamaModel: "",
               groqKeyVisible: false, spokenPunctuation: true, normalizeNumbers: true,
               voiceCommands: true, handsFree: false, llmPrompt: "", llmPromptDefault: "",
+              // voice editing of the selected text (flow.py command mode)
+              commandMode: true,
               // ---- floating pill placement ----
               // overlayPosition is either one of the nine presets ("bottom-center")
               // or a free {x, y} in percent of the FREE space on each axis — exactly
@@ -108,7 +110,7 @@ function mock(method, args) {
     // Preview the first-run wizard in a plain browser by adding ?onboard to the
     // URL; without it the mock reports an already-onboarded user (no wizard).
     onboarded: !/[?&]onboard\b/.test(location.search),
-    theme: "dark", gpu: "RTX 3070", hotkey: "Fn", version: "1.4.7",
+    theme: "dark", gpu: "RTX 3070", hotkey: "Fn", commandHotkey: "Alt + Ctrl + Space", version: "1.4.7",
     license: { licensed: true, daysLeft: 23, exp: "2026-08-04", reason: "ok", customer: "demo@buyer" },
     status: "idle",
     stats: { wordsToday: 2481, dictations: 37, wordsTotal: 184920, wpm: 132 },
@@ -155,6 +157,7 @@ function mock(method, args) {
   if (method === "history_clear") { state.history = []; return true; }
   if (method === "history_delete" || method === "history_copy") return true;
   if (method === "capture_hotkey") return state.hotkey;
+  if (method === "capture_command_hotkey") return { ok: true, label: state.commandHotkey, error: "" };
   if (method === "finish_onboarding") { console.log("[mock] finish_onboarding"); return true; }
   return null;
 }
@@ -165,6 +168,7 @@ async function boot() {
   state.theme = b.theme || "dark";
   state.gpu = b.gpu || "GPU";
   state.hotkey = b.hotkey || "Fn";
+  state.commandHotkey = b.commandHotkey || "";
   state.version = b.version || "";
   state.license = b.license || state.license;
   state.stats = b.stats; state.recent = b.recent; state.history = b.history;
@@ -890,6 +894,20 @@ function toggleRow(label, hint, key, help) {
     <button class="tg ${on ? "on" : ""}" role="switch" aria-checked="${on ? "true" : "false"}"
       aria-label="${esc(label)}" data-key="${key}"><span class="th"></span></button></div>`;
 }
+// Voice editing of the selected text (flow.py "command mode"). It always needs
+// the LLM, so with AI off the panel says so instead of offering a dead key.
+function commandPanel() {
+  const s = state.settings;
+  const noAi = s.llm === "off";
+  const key = state.commandHotkey || "не призначено";
+  return `<div class="panel"><h2>Голосове редагування</h2>
+    ${toggleRow("Голосове редагування виділеного", "Виділіть текст у будь-якій програмі, натисніть клавішу нижче й скажіть, що зробити: «зроби ввічливіше», «скороти», «зроби списком», «переклади англійською»", "commandMode")}
+    ${noAi ? `<div class="cloud-warn" role="note" style="margin:10px 0 2px">${svg(ICON.warn, 15)}<span>Потрібен AI: увімкніть Groq або Ollama на вкладці «AI».</span></div>` : ""}
+    <div class="hkwrap" style="margin-top:14px"><span class="keycap" id="cmdCap">${esc(key)}</span>
+      <button class="btn ghost" id="cmdHotkeyBtn">Змінити</button></div>
+    <div class="hint" id="cmdHint" style="margin-top:14px">${s.handsFree ? "Тап — почати, пауза або ще один тап — виконати" : "Утримуйте, поки говорите інструкцію"}. Виділений текст буде замінено результатом</div></div>`;
+}
+
 function renderSettings(el) {
   const s = state.settings, tab = state.settingsTab;
   const panes = {
@@ -905,6 +923,7 @@ function renderSettings(el) {
         <div class="hkwrap"><span class="keycap" id="hkCap">${esc(state.hotkey)}</span>
           <button class="btn ghost" id="hotkeyBtn">Змінити</button></div>
         <div class="hint" style="margin-top:14px">Утримувати для диктування — натисніть «Змінити» та виконайте потрібну комбінацію</div></div>
+      ${commandPanel()}
       <div class="panel"><h2>Оновлення</h2>
         <div class="srow"><div style="min-width:0">
             <div class="lab">Версія ${state.version ? "v" + esc(state.version) : "—"}</div>
@@ -1026,6 +1045,7 @@ function renderSettings(el) {
 
   if (tab === "general") {
     el.querySelector("#hotkeyBtn").onclick = captureHotkey;
+    el.querySelector("#cmdHotkeyBtn").onclick = captureCommandHotkey;
     const cu = el.querySelector("#chkUpdBtn");
     if (cu) cu.onclick = (e) => checkUpdateManual(e.currentTarget);
   }
@@ -1414,6 +1434,21 @@ async function captureHotkey() {
   btn.textContent = "Змінити";
   if (cap) cap.textContent = state.hotkey;
   paintTopHint();
+}
+
+// The command key refuses the dictation key and lone modifiers (see
+// webview_app.capture_command_hotkey), so it reports an error the user must see.
+async function captureCommandHotkey() {
+  const btn = document.getElementById("cmdHotkeyBtn");
+  const cap = document.getElementById("cmdCap");
+  btn.classList.remove("ghost"); btn.classList.add("pri");
+  btn.textContent = "Слухаю…";
+  const r = await api("capture_command_hotkey") || {};
+  if (typeof r.label === "string") state.commandHotkey = r.label;
+  btn.classList.remove("pri"); btn.classList.add("ghost");
+  btn.textContent = "Змінити";
+  if (cap) cap.textContent = state.commandHotkey || "не призначено";
+  if (r.error) toast(r.error);
 }
 
 // ================= FLOATING PANEL (Settings → Панель) =================
