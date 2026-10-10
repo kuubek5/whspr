@@ -10,6 +10,7 @@ import threading
 import webview
 
 import flow
+import app_styles
 
 # frozen (PyInstaller) builds unpack bundled data under sys._MEIPASS
 BASE = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
@@ -35,22 +36,14 @@ class Api:
     def __init__(self):
         self.gpu = detect_gpu()
 
-    # ---- bootstrap ----
-    def bootstrap(self):
-        c = flow.config
+    # ---- history feed ----
+    def _history_feed(self):
+        """Stats + recent + full history in one query. Shared by bootstrap (once
+        at boot) and history_feed (polled when a dictation lands), so an open
+        window updates its list live instead of only on the next restart."""
         s = flow.history_stats()
         rows = flow.history_last(200)  # single query; recent is a slice of it
         return {
-            "theme": c.get("theme", "dark"),
-            # first-run flag for the onboarding wizard. Defaults to True so a
-            # pre-existing config that predates the key is treated as already
-            # onboarded; only a fresh install (see flow.load_config) sends False.
-            "onboarded": c.get("onboarded", True),
-            "version": flow.APP_VERSION,
-            "license": flow.license_status(),
-            "gpu": self.gpu,
-            "hotkey": flow.hotkey_label(c.get("hotkey", "f9")),
-            "status": flow.state["status"],
             "stats": {
                 "wordsToday": s["words_today"], "dictations": s["total"],
                 "wordsTotal": s["words"], "wpm": round(s["wpm"]),
@@ -60,6 +53,29 @@ class Api:
             "history": [{"id": _id, "time": ts[11:16], "day": self._day_label(ts),
                          "lang": lang, "duration": f"{dur:.1f}с", "text": text}
                         for _id, ts, lang, dur, text in rows],
+        }
+
+    def history_feed(self):
+        return self._history_feed()
+
+    # ---- bootstrap ----
+    def bootstrap(self):
+        c = flow.config
+        return {
+            **self._history_feed(),
+            "theme": c.get("theme", "dark"),
+            # first-run flag for the onboarding wizard. Defaults to True so a
+            # pre-existing config that predates the key is treated as already
+            # onboarded; only a fresh install (see flow.load_config) sends False.
+            "onboarded": c.get("onboarded", True),
+            "version": flow.APP_VERSION,
+            "license": flow.license_status(),
+            "gpu": self.gpu,
+            "hotkey": flow.hotkey_label(c.get("hotkey", "f9")),
+            # command mode key; "" when unbound (hotkey_label would otherwise
+            # render parse_hotkey's "f9" fallback for an empty spec)
+            "commandHotkey": self._command_label(),
+            "status": flow.state["status"],
             "settings": {
                 "autostart": c.get("autostart", False),
                 "floatingPanel": c.get("overlay", True),
@@ -74,6 +90,8 @@ class Api:
                 "sound": c.get("sound", False),
                 "autoLang": c.get("auto_lang", False),
                 "model": c.get("model_uk", "stock"),
+                # local engine: "whisper" (default) | "parakeet" (optional)
+                "localEngine": c.get("local_engine", "whisper"),
                 "gpuDevice": self.gpu,
                 "device": c.get("device", "cuda"),
                 "inputDevice": c.get("input_device", ""),
@@ -84,6 +102,11 @@ class Api:
                 "normalizeNumbers": c.get("normalize_numbers", True),
                 "voiceCommands": c.get("voice_commands", True),
                 "handsFree": c.get("hands_free", False),
+                # semantic end-of-turn on top of the VAD auto-stop (hands-free)
+                "smartTurn": c.get("smart_turn", False),
+                "commandMode": c.get("command_mode_enabled", True),
+                # same key, nothing selected -> compose a message (run_scribe)
+                "scribeEnabled": c.get("scribe_enabled", True),
                 "llm": c.get("llm", "off"),
                 "groqKey": c.get("groq_api_key", ""),
                 "groqModel": c.get("groq_model", ""),
@@ -100,13 +123,28 @@ class Api:
                 # the settings page can prefill it and offer a reset
                 "llmPrompt": c.get("llm_prompt", ""),
                 "llmPromptDefault": flow.LLM_PROMPT,
+                # per-app polish style: the toggle is saved; the category list
+                # is read-only display (user overrides live in config.json)
+                "appStylesEnabled": c.get("app_styles_enabled", True),
+                "appStyles": app_styles.describe(c),
+                # "Мій стиль письма": the toggle is saved via save_settings,
+                # the profile itself is read-only here (rebuild_style_profile)
+                "styleProfileEnabled": c.get(
+                    "style_profile_enabled", flow.DEFAULTS["style_profile_enabled"]),
+                "styleProfile": self._style_profile_view(c.get("style_profile")),
             },
             "devices": flow.list_input_devices(),
             "models": flow.models_status(),
+            # {available, installed, size, quant} for the engine switch
+            "parakeet": flow.parakeet_status(),
             "dictionary": {
                 "hotwords": c.get("dictionary", ""),
                 "commands": [{"phrase": k, "result": v}
                              for k, v in c.get("replacements", {}).items()],
+                # whole-utterance trigger -> stored block (flow.match_snippet)
+                "snippets": [{"trigger": k, "text": v}
+                             for k, v in (c.get("snippets") or {}).items()],
+                "snippetsEnabled": c.get("snippets_enabled", True),
             },
         }
 
@@ -317,6 +355,11 @@ class Api:
         # Writing it from this payload too meant a stale value in the UI state
         # could reset the model whenever any unrelated toggle was flipped.
         c["device"] = "cpu" if s.get("device") == "cpu" else "cuda"
+        # local engine is read on every take (flow.local_engine_for), so no
+        # reload is needed; switching TO parakeet just warms it in the background
+        # so the next dictation does not pay its load time
+        old_engine = c.get("local_engine", "whisper")
+        c["local_engine"] = "parakeet" if s.get("localEngine") == "parakeet" else "whisper"
         c["input_device"] = s.get("inputDevice", "") or ""
         c["mic_on_demand"] = bool(s.get("micOnDemand"))
         c["mute_others"] = bool(s.get("muteOthers"))
@@ -329,6 +372,21 @@ class Api:
         c["normalize_numbers"] = bool(s.get("normalizeNumbers"))
         c["voice_commands"] = bool(s.get("voiceCommands"))
         c["hands_free"] = bool(s.get("handsFree"))
+        # Smart Turn is read when each hands-free take starts, so no restart.
+        # A payload without the key (an older cached page) keeps the current
+        # value. Turning it on starts the background load/download now, so the
+        # first take after the switch already has the model (never blocks).
+        c["smart_turn"] = bool(s.get("smartTurn", c.get("smart_turn", False)))
+        if c["smart_turn"] and flow.smart_turn_enabled():
+            flow.get_smart_turn()
+        # the listener binds the command key once at start, so a change to the
+        # toggle needs a listener rebuild. A payload without the key (an older
+        # cached page) keeps the current value instead of switching it off.
+        old_cmd = c.get("command_mode_enabled", True)
+        c["command_mode_enabled"] = bool(s.get("commandMode", old_cmd))
+        # Scribe is read per take (run_selection_command), so no listener
+        # rebuild; a payload without the key keeps the current value
+        c["scribe_enabled"] = bool(s.get("scribeEnabled", c.get("scribe_enabled", True)))
         if s.get("llm") in ("off", "groq", "ollama"):
             c["llm"] = s["llm"]
         # blank model fields fall back to the shipped defaults rather than
@@ -348,6 +406,14 @@ class Api:
         # its future improvements — keep applying; a real edit is stored verbatim
         prompt = (s.get("llmPrompt") or "").strip()
         c["llm_prompt"] = "" if prompt == flow.LLM_PROMPT.strip() else prompt
+        # read per take in _transcribe_impl, so no reload is needed. Missing key
+        # (an older UI payload) keeps the feature on, matching DEFAULTS.
+        c["app_styles_enabled"] = bool(s.get("appStylesEnabled", True))
+        # learned writing style: read per polish, no reload. A payload without
+        # the key (an older cached page) keeps the current value.
+        c["style_profile_enabled"] = bool(s.get(
+            "styleProfileEnabled",
+            c.get("style_profile_enabled", flow.DEFAULTS["style_profile_enabled"])))
         flow.save_config(c)
         flow.set_autostart(c["autostart"])
         # the pill bakes size and placement in when it is built, so it only
@@ -358,7 +424,11 @@ class Api:
         if c["input_device"] != old_dev or c["mic_on_demand"] != old_mode:
             flow.restart_stream()
         if c["device"] != old_device:
-            flow.reload_models()
+            flow.reload_models()  # also rebuilds Parakeet on the new device
+        elif c["local_engine"] == "parakeet" and old_engine != "parakeet":
+            threading.Thread(target=flow.preload_parakeet, daemon=True).start()
+        if c["command_mode_enabled"] != old_cmd:
+            flow.restart_listener()
         return True
 
     def list_devices(self):
@@ -369,7 +439,10 @@ class Api:
         return flow.models_status()
 
     def download_model(self, key):
-        return flow.download_model(key)
+        return flow.download_model(key)  # also takes "parakeet"
+
+    def parakeet_status(self):
+        return flow.parakeet_status()
 
     def delete_model(self, key):
         return flow.delete_model(key)
@@ -396,6 +469,69 @@ class Api:
                              for cm in commands if cm.get("phrase")}
         flow.save_config(c)
         return True
+
+    def save_snippets(self, items, enabled=None):
+        """A separate method rather than a third save_dictionary argument, so
+        an older UI calling save_dictionary(hotwords, commands) keeps working
+        and can never wipe snippets it does not know about. Rows with an empty
+        trigger or empty text are dropped; the text is stored untouched
+        (newlines and edge spaces included) because it is pasted verbatim."""
+        c = flow.config
+        out = {}
+        for it in items or []:
+            trig = str((it or {}).get("trigger") or "").strip()
+            text = str((it or {}).get("text") or "")
+            if trig and text.strip():
+                out[trig] = text.replace("\r\n", "\n")
+        c["snippets"] = out
+        if enabled is not None:
+            c["snippets_enabled"] = bool(enabled)
+        flow.save_config(c)
+        return True
+    def suggest_dictionary_terms(self):
+        """Terms the recogniser keeps spelling differently, mined from history.
+
+        pywebview already runs every js_api call on a worker thread, so this
+        never blocks the window; it takes ~0.6 s on a 2400-take history. The
+        whole history is read (capped), not the 200 rows the list shows: an
+        unstable term may only have been dictated a few times, months ago."""
+        import term_suggest
+        texts = [text for _id, _ts, _lang, _dur, text in flow.history_last(5000)]
+        try:
+            found = term_suggest.suggest_terms(
+                texts, flow.config.get("dictionary", ""))
+        except Exception as e:  # a bug here must not break the settings page
+            flow.log(f"suggest_dictionary_terms failed: {e}")
+            return []
+        return [{"term": r["term"],
+                 "variants": [{"text": s, "count": n} for s, n in r["variants"]],
+                 "total": r["total"], "examples": r["examples"]}
+                for r in found]
+
+    # ---- learned writing style ----
+    @staticmethod
+    def _style_profile_view(prof):
+        """What the Settings section shows: trait labels, when it was built,
+        from how many takes, and the exact text that goes to the AI (it is a
+        template, so showing it is the transparency the privacy note promises).
+        A missing/odd profile reads as "not built yet"."""
+        prof = prof if isinstance(prof, dict) else {}
+        traits = [{"id": str(t.get("id", "")), "label": str(t.get("label", ""))}
+                  for t in (prof.get("traits") or []) if isinstance(t, dict)]
+        return {"traits": traits, "builtAt": prof.get("built_at") or "",
+                "samples": int(prof.get("samples") or 0),
+                # the exact text appended to the polish prompt ("" = nothing)
+                "text": flow.style_profile_prompt(
+                    {"style_profile_enabled": True, "style_profile": prof})}
+
+    def rebuild_style_profile(self):
+        """Settings button "Оновити профіль". Runs on pywebview's worker thread
+        (~0.1 s); everything stays on this machine."""
+        prof = flow.rebuild_style_profile("manual")
+        if not prof:
+            return {"ok": False, "error": "Не вдалося порахувати профіль",
+                    **self._style_profile_view(flow.config.get("style_profile"))}
+        return {"ok": True, "error": "", **self._style_profile_view(prof)}
 
     # ---- history ----
     def history_copy(self, row_id):
@@ -429,6 +565,37 @@ class Api:
         flow.capture_hotkey(on_done)
         done.wait(timeout=10)
         return result.get("label", flow.hotkey_label(flow.config.get("hotkey", "f9")))
+
+    @staticmethod
+    def _command_label():
+        spec = flow.config.get("command_hotkey", "") or ""
+        return flow.hotkey_label(spec) if spec.strip() else ""
+
+    def capture_command_hotkey(self):
+        """Capture the command-mode key. Returns {"ok", "label", "error"}.
+
+        Refuses the dictation key itself (one key cannot mean both "type what I
+        say" and "edit my selection") and a lone modifier, which would fire on
+        every ordinary Ctrl+C / Alt+Tab the user types."""
+        result = {}
+        done = threading.Event()
+
+        def on_done(spec):
+            keys = flow.parse_hotkey(spec)
+            if keys == flow.parse_hotkey(flow.config.get("hotkey", "f9")):
+                result["error"] = "Ця клавіша вже запускає диктування"
+            elif keys <= flow.MODS_SET:
+                result["error"] = "Потрібна звичайна клавіша, не лише Ctrl/Alt/Shift"
+            else:
+                flow.config["command_hotkey"] = spec
+                flow.save_config(flow.config)
+                flow.restart_listener()
+            done.set()
+
+        flow.capture_hotkey(on_done)
+        finished = done.wait(timeout=10)
+        err = result.get("error", "" if finished else "Час вийшов — спробуйте ще")
+        return {"ok": not err, "label": self._command_label(), "error": err}
 
 
 def run() -> None:

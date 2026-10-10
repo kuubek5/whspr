@@ -20,6 +20,7 @@ const ICON = {
   trash: '<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>',
   plus: '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
   x: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
+  download: '<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M4 19h16"/>',
   warn: '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
   shield: '<path d="M12 2 4 5v6c0 5 3.5 8.5 8 11 4.5-2.5 8-6 8-11V5l-8-3Z"/>',
   upd: '<path d="M21 12a9 9 0 1 1-3-6.7"/><polyline points="21 3 21 9 15 9"/>',
@@ -36,11 +37,13 @@ const svg = (p, s = 19) => `<svg width="${s}" height="${s}" viewBox="0 0 24 24" 
 
 const state = {
   theme: "dark", page: "home", homeState: "idle", recordSecs: 0,
-  gpu: "…", hotkey: "Fn", listening: false, version: "", update: { available: false },
+  gpu: "…", hotkey: "Fn", commandHotkey: "", listening: false, version: "", update: { available: false },
   license: { licensed: true, daysLeft: 0, exp: "", reason: "ok", customer: "" },
   stats: { wordsToday: 0, dictations: 0, wordsTotal: 0, wpm: 0 },
   recent: [], history: [],
   histQuery: "", histSel: 0, settingsTab: "general",
+  // dictionary suggestions from history: null until "Знайти проблемні слова"
+  suggestions: null, suggestionsFound: 0,
   // first-run onboarding. `onboarded` comes from bootstrap (defaults true, so an
   // existing user is never interrupted); `onb` is the live wizard state or null.
   onboarded: true, onb: null,
@@ -54,6 +57,20 @@ const state = {
               llm: "off", groqKey: "", groqModel: "", ollamaModel: "",
               groqKeyVisible: false, spokenPunctuation: true, normalizeNumbers: true,
               voiceCommands: true, handsFree: false, llmPrompt: "", llmPromptDefault: "",
+              // Smart Turn: stop a hands-free take as soon as the phrase sounds finished
+              smartTurn: false,
+              // per-app polish style: toggle is saved, appStyles is a read-only
+              // [{id, label, hint, apps, web}] list from app_styles.describe()
+              appStylesEnabled: true, appStyles: [],
+              // "Мій стиль письма": habits counted locally from history.
+              // styleProfile = {traits:[{id,label}], builtAt, samples, text}.
+              // Off by default (measured: no clear gain, see flow.DEFAULTS)
+              styleProfileEnabled: false,
+              styleProfile: { traits: [], builtAt: "", samples: 0, text: "" },
+              // voice editing of the selected text (flow.py command mode)
+              commandMode: true,
+              // same key with nothing selected composes a message (flow.py run_scribe)
+              scribeEnabled: true,
               // ---- floating pill placement ----
               // overlayPosition is either one of the nine presets ("bottom-center")
               // or a free {x, y} in percent of the FREE space on each axis — exactly
@@ -62,10 +79,14 @@ const state = {
               overlayOpacity: 82,
               // ---- cloud recognition (BYOK) ----
               sttBackend: "local", sttProvider: "groq",
-              sttModel: "whisper-large-v3", openaiKey: "", elevenlabsKey: "" },
+              sttModel: "whisper-large-v3", openaiKey: "", elevenlabsKey: "",
+              // ---- local engine: "whisper" (default) | "parakeet" ----
+              localEngine: "whisper" },
   devices: [],
   models: [],
-  dictionary: { hotwords: "", commands: [] },
+  // optional Parakeet engine: is onnx-asr there, are its weights downloaded
+  parakeet: { available: false, installed: false, size: "640 MB", quant: "int8" },
+  dictionary: { hotwords: "", commands: [], snippets: [], snippetsEnabled: true },
 };
 
 // ---- bridge ----
@@ -87,7 +108,27 @@ const MOCK_MODELS = [
   { id: "base", label: "Base", size: "141 MB", note: "дуже легка, помітно гірша якість", installed: false, active: false, diskMb: 0 },
   { id: "tiny", label: "Tiny", size: "74 MB", note: "найшвидша, найгірша якість", installed: false, active: false, diskMb: 0 },
 ];
+const MOCK_PARAKEET = { available: true, installed: false, size: "640 MB", quant: "int8" };
 
+// trimmed copy of what app_styles.describe() returns, for the browser preview
+const MOCK_APP_STYLES = [
+  { id: "chat", label: "Месенджери", hint: "Розмовно й коротко, без привітань і підписів",
+    apps: ["discord.exe", "signal.exe", "slack.exe", "telegram.exe", "viber.exe", "whatsapp.exe"],
+    web: ["telegram", "whatsapp", "discord", "slack"] },
+  { id: "email", label: "Пошта й документи", hint: "Акуратна пунктуація, охайний тон",
+    apps: ["outlook.exe", "thunderbird.exe", "winword.exe"], web: ["gmail", "outlook"] },
+  { id: "code", label: "Код і термінал", hint: "Без перефразування — лише збої й пунктуація",
+    apps: ["claude.exe", "cmd.exe", "code.exe", "cursor.exe", "pwsh.exe", "windowsterminal.exe"], web: [] },
+];
+// trimmed copy of what Api._style_profile_view() returns, for the preview
+const MOCK_STYLE_PROFILE = {
+  traits: [{ id: "address_ty", label: "Пишете на «ти»" },
+           { id: "latin_terms", label: "Англійські терміни — латиницею" },
+           { id: "short_sent", label: "Короткі речення" },
+           { id: "no_exclaim", label: "Майже без знаків оклику" }],
+  builtAt: "2026-10-10 09:12", samples: 2037,
+  text: "Звички автора (лише не порушуй їх, текст під них не переписуй; правила вище та інструкція для програми нижче важливіші):\n- Автор звертається на «ти» — не міняй на «ви».\n- Короткі речення — не зливай їх у довгі.",
+};
 function mock(method, args) {
   if (method === "list_models") return MOCK_MODELS;
   if (method === "activate_model") {
@@ -99,7 +140,9 @@ function mock(method, args) {
     if (m) { m.installed = false; m.diskMb = 0; }
     return { ok: true };
   }
+  if (method === "parakeet_status") return MOCK_PARAKEET;
   if (method === "download_model") {
+    if (args[0] === "parakeet") { MOCK_PARAKEET.installed = true; return { ok: true }; }
     const m = MOCK_MODELS.find((x) => x.id === args[0]);
     if (m) { m.installed = true; m.diskMb = 2048; }
     return { ok: true };
@@ -108,7 +151,7 @@ function mock(method, args) {
     // Preview the first-run wizard in a plain browser by adding ?onboard to the
     // URL; without it the mock reports an already-onboarded user (no wizard).
     onboarded: !/[?&]onboard\b/.test(location.search),
-    theme: "dark", gpu: "RTX 3070", hotkey: "Fn", version: "1.4.7",
+    theme: "dark", gpu: "RTX 3070", hotkey: "Fn", commandHotkey: "Alt + Ctrl + Space", version: "1.4.7",
     license: { licensed: true, daysLeft: 23, exp: "2026-08-04", reason: "ok", customer: "demo@buyer" },
     status: "idle",
     stats: { wordsToday: 2481, dictations: 37, wordsTotal: 184920, wpm: 132 },
@@ -125,10 +168,12 @@ function mock(method, args) {
       { id: 2, day: "Вчора", time: "19:20", lang: "uk", duration: "2.4с", text: "нагадати купити фотополімер для друку" },
       { id: 1, day: "12 вересня", time: "16:05", lang: "en", duration: "3.0с", text: "schedule the standup for tomorrow morning" },
     ],
-    settings: state.settings,
+    settings: Object.assign({}, state.settings, { appStyles: MOCK_APP_STYLES,
+                                                   styleProfile: MOCK_STYLE_PROFILE }),
     devices: [{ name: "Мікрофон (Realtek Audio)" }, { name: "Вхід (XONAR SOUND CARD)" },
               { name: "OnePlus 9R Hands-Free" }],
     models: MOCK_MODELS,
+    parakeet: MOCK_PARAKEET,
     dictionary: {
       hotwords: "Klipper, PID, sinter, FPV, Proxmox, homelab, Vaultwarden",
       commands: [
@@ -136,6 +181,11 @@ function mock(method, args) {
         { phrase: "кома", result: "," }, { phrase: "крапка", result: "." },
         { phrase: "знак питання", result: "?" },
       ],
+      snippets: [
+        { trigger: "мій підпис", text: "З повагою,\nРоман\n+380 00 000 00 00" },
+        { trigger: "посилання на календар", text: "https://cal.example.com/roma" },
+      ],
+      snippetsEnabled: true,
     },
   };
   if (method === "get_status") return state.homeState;
@@ -151,9 +201,30 @@ function mock(method, args) {
   if (method === "activate_license") return { ok: true, licensed: true, daysLeft: 30, exp: "2026-08-11", reason: "ok" };
   if (method === "save_settings") { console.log("[mock] save_settings", args[0]); return true; }
   if (method === "save_dictionary") { console.log("[mock] save_dictionary", args); return true; }
+  if (method === "save_snippets") { console.log("[mock] save_snippets", args); return true; }
+  if (method === "suggest_dictionary_terms") {
+    // a promise, like the real bridge call; the real scan takes ~0.6 s
+    return new Promise((r) => setTimeout(() => r([
+      { term: "скачано-прошито", total: 14, examples: [], variants: [
+        { text: "скачано-прошитано", count: 3 }, { text: "просчитане", count: 3 },
+        { text: "скачано-просчитано", count: 2 }, { text: "скачане прочитане", count: 2 },
+        { text: "скачано-прощитано", count: 1 }, { text: "скачана-прошитана", count: 1 },
+        { text: "прощитана", count: 1 }, { text: "скачано-прощитено", count: 1 }] },
+      { term: "Moonraker", total: 7, examples: [], variants: [
+        { text: "мунрейкер", count: 4 }, { text: "Moonraker", count: 2 }, { text: "мунрекер", count: 1 }] },
+      { term: "OctoPrint", total: 4, examples: [], variants: [
+        { text: "OctoPrint", count: 2 }, { text: "октопринт", count: 1 }, { text: "актапринт", count: 1 }] },
+    ]), 500));
+  }
+  if (method === "rebuild_style_profile") {
+    return new Promise((r) => setTimeout(() => r(Object.assign({ ok: true, error: "" },
+      MOCK_STYLE_PROFILE, { builtAt: new Date().toISOString().slice(0, 16).replace("T", " ") })), 300));
+  }
+  if (method === "history_feed") return { stats: state.stats, recent: state.recent, history: state.history };
   if (method === "history_clear") { state.history = []; return true; }
   if (method === "history_delete" || method === "history_copy") return true;
   if (method === "capture_hotkey") return state.hotkey;
+  if (method === "capture_command_hotkey") return { ok: true, label: state.commandHotkey, error: "" };
   if (method === "finish_onboarding") { console.log("[mock] finish_onboarding"); return true; }
   return null;
 }
@@ -164,13 +235,19 @@ async function boot() {
   state.theme = b.theme || "dark";
   state.gpu = b.gpu || "GPU";
   state.hotkey = b.hotkey || "Fn";
+  state.commandHotkey = b.commandHotkey || "";
   state.version = b.version || "";
   state.license = b.license || state.license;
   state.stats = b.stats; state.recent = b.recent; state.history = b.history;
   state.settings = Object.assign(state.settings, b.settings || {});
   state.devices = b.devices || [];
   state.models = b.models || [];
-  state.dictionary = b.dictionary; state.homeState = b.status || "idle";
+  if (b.parakeet) state.parakeet = b.parakeet;
+  state.dictionary = b.dictionary;
+  // a bridge that predates snippets sends no list; default so the page renders
+  if (!Array.isArray(state.dictionary.snippets)) state.dictionary.snippets = [];
+  if (typeof state.dictionary.snippetsEnabled !== "boolean") state.dictionary.snippetsEnabled = true;
+  state.homeState = b.status || "idle";
   // onboarded may legitimately be false; anything non-boolean means "assume
   // onboarded" so a bridge that predates the flag never traps the user in a wizard
   state.onboarded = (typeof b.onboarded === "boolean") ? b.onboarded : true;
@@ -303,7 +380,7 @@ function renderHome(el) {
       <div class="ico">${svg(ICON.upd, 17)}</div>
       <div class="bt"><div class="tt">Доступне оновлення v${esc(state.update.version)}</div>
         <div class="bb">Застосунок перезапуститься після встановлення</div></div>
-      <button class="btn pri" style="padding:8px 14px" id="updBtn">Оновити</button></div>` : ""}
+      <button class="btn pri sm" id="updBtn">Оновити</button></div>` : ""}
     <div class="hero" id="hero">
       <span class="blob b1" aria-hidden="true"></span><span class="blob b2" aria-hidden="true"></span>
       <div class="hero-in" id="heroCenter"></div>
@@ -316,8 +393,8 @@ function renderHome(el) {
     </div>
     <div class="sechead"><h2>Останні диктовки</h2>${state.history.length ? `<button class="lnk" id="allHist">Уся історія →</button>` : ""}</div>
     ${state.recent && state.recent.length ? `<div class="recent">${state.recent.slice(0, 4).map((r) => `
-      <div class="rc"><div class="av">${svg(ICON.check, 18)}</div>
-        <div class="tx"><div class="t">${esc(r.text)}</div><div class="m mono">${esc(r.time)}</div></div></div>`).join("")}</div>`
+      <button class="rc" type="button" data-t="${esc(r.text)}" aria-label="Відкрити в історії: ${esc(r.text)}"><div class="av">${svg(ICON.check, 18)}</div>
+        <div class="tx"><div class="t">${esc(r.text)}</div><div class="m mono">${esc(r.time)}</div></div></button>`).join("")}</div>`
       : emptyBlock(ICON.mic, "Ще жодної диктовки", `Затисніть ${state.hotkey} і скажіть кілька слів — ваша перша диктовка зʼявиться тут.`)}`;
   micWarnKey = null;  // fresh slot node — force a paint into it
   renderMicWarning();
@@ -327,6 +404,14 @@ function renderHome(el) {
   if (ub) ub.onclick = doInstallUpdate;
   const ah = el.querySelector("#allHist");
   if (ah) ah.onclick = () => goto("history");
+  // a recent row opens that very dictation in History (matched by text — the
+  // recent feed carries no ids), so the card's hover lift keeps its promise
+  el.querySelectorAll(".rc[data-t]").forEach((c) => c.onclick = () => {
+    state.histQuery = "";
+    const i = (state.history || []).findIndex((h) => h.text === c.dataset.t);
+    state.histSel = i >= 0 ? i : 0;
+    goto("history");
+  });
   void s;
 }
 function heroTitle() {
@@ -537,8 +622,8 @@ function renderMicWarning() {
     <div class="ico">${svg(ICON.warn, 17)}</div>
     <div class="bt"><div class="tt">Мікрофон записує надто тихо</div>
       <div class="bb" id="micWarnBody">${esc(body)}</div></div>
-    ${canFix && !state.micWarnMsg ? `<button class="btn ghost" style="padding:8px 14px" id="micFixBtn">Підняти рівень</button>` : ""}
-    <button class="x" id="micWarnX" aria-label="Приховати">✕</button>
+    ${canFix && !state.micWarnMsg ? `<button class="btn ghost sm" id="micFixBtn">Підняти рівень</button>` : ""}
+    <button class="x" id="micWarnX" aria-label="Приховати">${svg(ICON.x, 15)}</button>
   </div>`;
   slot.querySelector("#micWarnX").onclick = () => {
     state.micWarnDismissed = true; renderMicWarning();
@@ -624,7 +709,7 @@ function renderHistory(el) {
       <div class="hist-col">
         <div class="hist-search">${svg(ICON.search, 16)}
           <input id="hsearch" placeholder="Пошук у диктовках…" value="${esc(state.histQuery)}" aria-label="Пошук у диктовках">
-          <button class="clr ${state.histQuery ? "show" : ""}" id="hclr" aria-label="Очистити пошук">✕</button></div>
+          <button class="clr ${state.histQuery ? "show" : ""}" id="hclr" aria-label="Очистити пошук">${svg(ICON.x, 14)}</button></div>
         <div class="hist-list" id="hlist" role="listbox" tabindex="0" aria-label="Диктовки"></div>
       </div>
       <div class="hist-detail" id="hdetail"></div>
@@ -746,15 +831,34 @@ function renderDictionary(el) {
       ${hnote("hlp-hotwords", "Хотворди — це рідкісні слова й терміни (назви, бренди, жаргон), які модель часто чує неправильно. Додайте їх сюди, і розпізнавання віддаватиме їм перевагу.")}
       <div class="hw-chips" id="hwchips"></div>
       <div class="hw-add">${svg(ICON.plus, 16)}<input id="hwadd" placeholder="Додати термін і натиснути Enter…" aria-label="Додати термін"></div>
+      <div class="sug">
+        <div class="sug-top">
+          <button class="btn ghost" id="sugFind">${svg(ICON.search, 15)}Знайти проблемні слова</button>
+          <span class="sug-hint">Шукає в історії слова, які модель щоразу пише по-різному</span>
+        </div>
+        <div class="sug-list" id="suglist" aria-live="polite"></div>
+      </div>
     </div>
     <div class="panel">
       <div class="dhead"><div class="di a">${svg(ICON.mic, 20)}</div><h2>Голосові команди</h2>
-        <button class="addbtn" id="cmdAdd">${svg(ICON.plus, 14)}Додати</button></div>
+        <div class="acts"><button class="addbtn" id="cmdAdd">${svg(ICON.plus, 14)}Додати</button></div></div>
       <div class="desc">Промовте фразу зліва — KuubWave вставить символ праворуч. Наприклад: «нова думка» = ⏎</div>
       <div class="cmd-list" id="cmdlist"></div>
     </div>
+    <div class="panel">
+      <div class="dhead"><div class="di c">${svg(ICON.dictionary, 20)}</div>
+        <h2 class="lab-h">Сніпети${hbtn("hlp-snippets")}</h2>
+        <div class="acts">
+          <button class="tg ${state.dictionary.snippetsEnabled ? "on" : ""}" role="switch" id="snipOn"
+            aria-checked="${state.dictionary.snippetsEnabled ? "true" : "false"}" aria-label="Увімкнути сніпети"><span class="th"></span></button>
+          <button class="addbtn" id="snipAdd">${svg(ICON.plus, 14)}Додати</button></div></div>
+      <div class="desc">Скажіть лише фразу — KuubWave вставить збережений текст без змін. Наприклад: «мій підпис» → ваш підпис</div>
+      ${hnote("hlp-snippets", "Сніпет спрацьовує, тільки коли вся диктовка — це його фраза (можна з «вставити» на початку). Якщо фраза прозвучить посеред речення, текст надиктується як звичайно. Текст сніпета вставляється дослівно: з усіма рядками, без AI-полірування й автозамін. Після вставки «видали це» прибере його.")}
+      <div class="snip-list" id="sniplist"></div>
+    </div>
     <div class="dict-save"><button class="btn pri" id="dictSave">Зберегти</button></div>`;
-  drawHotwords(); drawCmds();
+  drawHotwords(); drawCmds(); drawSnippets(); drawSuggestions();
+  el.querySelector("#sugFind").onclick = findSuggestions;
   const add = el.querySelector("#hwadd");
   add.onkeydown = (e) => {
     if (e.key !== "Enter" && e.key !== ",") return;
@@ -777,10 +881,43 @@ function renderDictionary(el) {
     const last = rows[rows.length - 1];
     if (last) last.querySelector(".p").focus();
   };
+  el.querySelector("#snipAdd").onclick = () => {
+    state.dictionary.snippets.push({ trigger: "", text: "" }); drawSnippets();
+    const rows = document.querySelectorAll("#sniplist .snip");
+    const last = rows[rows.length - 1];
+    if (last) last.querySelector(".t").focus();
+  };
+  const sw = el.querySelector("#snipOn");
+  sw.onclick = () => {
+    const on = !state.dictionary.snippetsEnabled;
+    state.dictionary.snippetsEnabled = on;
+    sw.classList.toggle("on", on); sw.setAttribute("aria-checked", on ? "true" : "false");
+  };
   el.querySelector("#dictSave").onclick = async () => {
     await api("save_dictionary", state.dictionary.hotwords, state.dictionary.commands);
+    // rows missing a trigger or text are dropped by the bridge; mirror that
+    // here so the page shows exactly what was saved
+    state.dictionary.snippets = state.dictionary.snippets.filter((s) => s.trigger.trim() && s.text.trim());
+    await api("save_snippets", state.dictionary.snippets, state.dictionary.snippetsEnabled);
+    drawSnippets();
     toast("Словник збережено");
   };
+}
+function drawSnippets() {
+  const l = document.getElementById("sniplist"); if (!l) return;
+  const sn = state.dictionary.snippets;
+  if (!sn.length) { l.innerHTML = `<div class="dict-empty">Ще немає сніпетів — додайте підпис, адресу чи посилання</div>`; return; }
+  l.innerHTML = sn.map((s, i) => `<div class="snip" data-i="${i}">
+    <div class="snip-top">
+      <input class="inp t" value="${esc(s.trigger)}" placeholder="фраза, напр. мій підпис" aria-label="Фраза-тригер">
+      <button class="mini del" aria-label="Видалити сніпет">${svg(ICON.trash, 14)}</button></div>
+    <textarea class="ta x" rows="3" placeholder="Текст, який буде вставлено" aria-label="Текст сніпета">${esc(s.text)}</textarea></div>`).join("");
+  l.querySelectorAll(".snip").forEach((row) => {
+    const i = +row.dataset.i;
+    row.querySelector(".t").oninput = (e) => (sn[i].trigger = e.target.value);
+    row.querySelector(".x").oninput = (e) => (sn[i].text = e.target.value);
+    row.querySelector(".del").onclick = () => { sn.splice(i, 1); drawSnippets(); };
+  });
 }
 function drawHotwords() {
   const c = document.getElementById("hwchips"); if (!c) return;
@@ -788,10 +925,76 @@ function drawHotwords() {
   const cnt = document.getElementById("hwCnt");
   if (cnt) cnt.textContent = `${hw.length} термінів`;
   if (!hw.length) { c.innerHTML = `<div class="dict-empty" style="width:100%">Ще немає термінів</div>`; return; }
-  c.innerHTML = hw.map((w, i) => `<span class="hw-chip">${esc(w)}<button class="x" data-i="${i}" aria-label="Видалити ${esc(w)}">✕</button></span>`).join("");
+  c.innerHTML = hw.map((w, i) => `<span class="hw-chip">${esc(w)}<button class="x" data-i="${i}" aria-label="Видалити ${esc(w)}">${svg(ICON.x, 12)}</button></span>`).join("");
   c.querySelectorAll(".x").forEach((b) => b.onclick = () => {
     const l = hwList(); l.splice(+b.dataset.i, 1);
     state.dictionary.hotwords = l.join(", "); drawHotwords();
+  });
+}
+// Ukrainian plural: 1 раз, 2–4 рази, 5–20 разів, 21 раз ...
+function ukPlural(n, one, few, many) {
+  const m10 = n % 10, m100 = n % 100;
+  if (m10 === 1 && m100 !== 11) return one;
+  if (m10 >= 2 && m10 <= 4 && (m100 < 12 || m100 > 14)) return few;
+  return many;
+}
+// Suggestions live in state (null = never searched) so switching pages and back
+// keeps the list instead of silently dropping what the user has not decided yet.
+async function findSuggestions() {
+  const b = document.getElementById("sugFind");
+  if (b) { b.disabled = true; b.lastChild.textContent = "Шукаю…"; }
+  let res = [];
+  try { res = (await api("suggest_dictionary_terms")) || []; } catch (e) { res = []; }
+  state.suggestions = res; state.suggestionsFound = res.length;
+  const bb = document.getElementById("sugFind");
+  if (bb) { bb.disabled = false; bb.lastChild.textContent = "Знайти проблемні слова"; }
+  drawSuggestions();
+}
+function drawSuggestions() {
+  const l = document.getElementById("suglist"); if (!l) return;
+  const s = state.suggestions;
+  if (!s) { l.innerHTML = ""; return; }
+  if (!s.length) {
+    // "nothing found" and "you went through all of them" are different news
+    l.innerHTML = state.suggestionsFound
+      ? `<div class="dict-empty">Готово — усі пропозиції розглянуто</div>`
+      : `<div class="dict-empty">Проблемних слів не знайдено — модель пише ваші терміни стабільно</div>`;
+    return;
+  }
+  const MAXV = 6;
+  l.innerHTML = s.map((x, i) => {
+    const vs = x.variants || [];
+    const shown = vs.slice(0, MAXV).map((v) => `${esc(v.text)} <b>×${v.count}</b>`).join(" · ");
+    const more = vs.length > MAXV ? ` · ще ${vs.length - MAXV}` : "";
+    return `<div class="sug-row" data-i="${i}">
+      <div class="sug-main">
+        <input class="inp" value="${esc(x.term)}" aria-label="Як писати термін">
+        <div class="sug-vars">${vs.length} ${ukPlural(vs.length, "написання", "написання", "написань")}, ${x.total} ${ukPlural(x.total, "раз", "рази", "разів")}: ${shown}${more}</div>
+      </div>
+      <div class="sug-acts">
+        <button class="btn pri sm add">Додати</button>
+        <button class="btn ghost sm skip">Пропустити</button>
+      </div></div>`;
+  }).join("");
+  l.querySelectorAll(".sug-row").forEach((row) => {
+    const i = +row.dataset.i;
+    const inp = row.querySelector(".inp");
+    inp.oninput = () => (state.suggestions[i].term = inp.value);
+    row.querySelector(".skip").onclick = () => { state.suggestions.splice(i, 1); drawSuggestions(); };
+    row.querySelector(".add").onclick = async () => {
+      // commas would split the term into several hotwords on the next save
+      const v = inp.value.trim().replace(/,/g, " ").replace(/\s+/g, " ");
+      if (!v) { inp.focus(); return; }
+      const hw = hwList();
+      if (!hw.some((w) => w.toLowerCase() === v.toLowerCase())) {
+        hw.push(v); state.dictionary.hotwords = hw.join(", "); drawHotwords();
+      }
+      // saved at once: "Додати" reads as done, and the unsaved-chip state of
+      // the manual input field is easy to lose by leaving the page
+      await api("save_dictionary", state.dictionary.hotwords, state.dictionary.commands);
+      state.suggestions.splice(i, 1); drawSuggestions();
+      toast(`«${v}» додано до словника`);
+    };
   });
 }
 function drawCmds() {
@@ -881,14 +1084,70 @@ function sttCloudHtml() {
       <span class="cloud-price">${p.free ? "Є безкоштовний ліміт · ціни у провайдера" : "Ціни у провайдера"}</span></div>
     <div class="note" id="sttVerifyNote" style="display:none;margin-top:2px"></div></div>`;
 }
+function appStylesListHtml() {
+  const list = state.settings.appStyles || [];
+  return list.map((c) => {
+    const apps = (c.apps || []).map((a) => a.replace(/\.exe$/i, ""));
+    const web = (c.web || []).length ? ` · у браузері: ${(c.web || []).join(", ")}` : "";
+    return `<div class="style-item"><div class="lab">${esc(c.label || c.id)}</div>
+      ${c.hint ? `<div class="hint">${esc(c.hint)}</div>` : ""}
+      <div class="apps mono">${esc(apps.join(", ") || "—")}${esc(web)}</div></div>`;
+  }).join("");
+}
+// "Мій стиль письма": the learned habits as chips, when/how it was built, and
+// the exact text the AI receives (folded) — it is a template, never user text.
+function styleTraitsHtml() {
+  const p = state.settings.styleProfile || {};
+  const tr = p.traits || [];
+  if (!tr.length) {
+    return `<div class="trait-empty">${p.builtAt
+      ? "Поки замало диктовок, щоб упевнено щось сказати про стиль — профіль порожній і ні на що не впливає"
+      : "Профіль ще не пораховано — натисніть «Оновити профіль»"}</div>`;
+  }
+  return tr.map((t) => `<span class="trait">${esc(t.label)}</span>`).join("");
+}
+function styleMetaText() {
+  const p = state.settings.styleProfile || {};
+  if (!p.builtAt) return "Ще не оновлювався";
+  return `Оновлено ${esc(p.builtAt)} · з ${Number(p.samples || 0)} диктовок`;
+}
+function styleProfileHtml() {
+  const s = state.settings, p = s.styleProfile || {};
+  return `<div id="styleProfileBlock" class="sep gt">
+    ${toggleRow("Мій стиль письма", "AI зберігає ваші звички — «ти» чи «ви», довжину речень, терміни латиницею. Експериментально: різниця невелика, трохи більше токенів на кожну диктовку", "styleProfileEnabled",
+      ["hlp-styleprofile", "KuubWave рахує на цьому комп'ютері кілька загальних звичок із вашої історії диктовок і додає їх до інструкції як короткі правила. Самі тексти, імена чи цифри з історії нікуди не йдуть і в правила не потрапляють. Оновлюється сам раз на тиждень."])}
+    <div class="sp-wrap" id="spWrap"${s.styleProfileEnabled ? "" : " hidden"}>
+      <div class="trait-list" id="spTraits">${styleTraitsHtml()}</div>
+      <div class="note ok gt">${svg(ICON.shield, 15)}<span>Профіль рахується на цьому комп'ютері; у хмару йдуть лише ці загальні правила, не ваші тексти</span></div>
+      <div class="sp-foot"><span class="sp-meta" id="spMeta">${styleMetaText()}</span>
+        <button class="btn ghost sm" id="spRebuild">Оновити профіль</button></div>
+      <details class="sp-text" id="spTextBox"${p.text ? "" : " hidden"}><summary>Що саме отримує AI</summary>
+        <pre id="spText">${esc(p.text || "")}</pre></details>
+    </div></div>`;
+}
 function toggleRow(label, hint, key, help) {
   const on = state.settings[key];
-  return `<div class="srow"><div style="min-width:0">
+  return `<div class="srow"><div class="sl">
       <div class="lab lab-h">${label}${help ? hbtn(help[0]) : ""}</div>
       <div class="hint">${hint}</div>${help ? hnote(help[0], help[1]) : ""}</div>
     <button class="tg ${on ? "on" : ""}" role="switch" aria-checked="${on ? "true" : "false"}"
       aria-label="${esc(label)}" data-key="${key}"><span class="th"></span></button></div>`;
 }
+// Voice editing of the selected text (flow.py "command mode"). It always needs
+// the LLM, so with AI off the panel says so instead of offering a dead key.
+function commandPanel() {
+  const s = state.settings;
+  const noAi = s.llm === "off";
+  const key = state.commandHotkey || "не призначено";
+  return `<div class="panel"><h2>Голосове редагування</h2>
+    ${toggleRow("Голосове редагування виділеного", "Виділіть текст у будь-якій програмі, натисніть клавішу нижче й скажіть, що зробити: «зроби ввічливіше», «скороти», «зроби списком», «переклади англійською»", "commandMode")}
+    ${toggleRow("Написати повідомлення (Scribe)", "Нічого не виділено → опишіть, що написати: «напиши Олегу, що зустріч переноситься на завтра» — вставиться готовий текст", "scribeEnabled")}
+    ${noAi ? `<div class="cloud-warn" role="note" style="margin:10px 0 2px">${svg(ICON.warn, 15)}<span>Потрібен AI: увімкніть Groq або Ollama на вкладці «AI».</span></div>` : ""}
+    <div class="hkwrap gt"><span class="keycap" id="cmdCap">${esc(key)}</span>
+      <button class="btn ghost" id="cmdHotkeyBtn">Змінити</button></div>
+    <div class="hint gt" id="cmdHint">${s.handsFree ? "Тап — почати, пауза або ще один тап — виконати" : "Утримуйте, поки говорите інструкцію"}. Виділений текст буде замінено результатом${s.scribeEnabled ? "; без виділення — вставиться нове повідомлення. У терміналах не працює" : ""}</div></div>`;
+}
+
 function renderSettings(el) {
   const s = state.settings, tab = state.settingsTab;
   const panes = {
@@ -899,20 +1158,23 @@ function renderSettings(el) {
       <div class="panel"><h2>Поведінка</h2>
         ${toggleRow("Голосові команди", "«великими літерами», «видали останнє», «переклади англійською» — діють на попередню диктовку", "voiceCommands")}
         ${toggleRow("Режим без утримання", "Тап клавіші вмикає запис, авто-стоп після паузи (або тап ще раз). Інакше — утримувати клавішу", "handsFree",
-          ["hlp-handsfree", "Зазвичай ви утримуєте клавішу, поки говорите. У режимі без утримання один тап вмикає запис, а він сам зупиняється після паузи — зручно для довгих диктовок."])}</div>
+          ["hlp-handsfree", "Зазвичай ви утримуєте клавішу, поки говорите. У режимі без утримання один тап вмикає запис, а він сам зупиняється після паузи — зручно для довгих диктовок."])}
+        ${toggleRow("Розумне визначення кінця фрази", "У режимі без утримання: зупиняє запис одразу, коли фраза звучить завершеною, а не чекає повну паузу. Якщо обриває на півслові — вимкніть", "smartTurn",
+          ["hlp-smartturn", "Невелика модель (8 МБ, завантажується один раз) слухає інтонацію: чи ви закінчили думку, чи просто замислилися. Коротка пауза після завершеної фрази — і запис зупиняється. Пауза посеред речення або «е-е» не зупиняє: тоді діє звичайна довга пауза."])}</div>
       <div class="panel"><h2>Гаряча клавіша</h2>
         <div class="hkwrap"><span class="keycap" id="hkCap">${esc(state.hotkey)}</span>
           <button class="btn ghost" id="hotkeyBtn">Змінити</button></div>
-        <div class="hint" style="margin-top:14px">Утримувати для диктування — натисніть «Змінити» та виконайте потрібну комбінацію</div></div>
+        <div class="hint gt">Утримувати для диктування — натисніть «Змінити» та виконайте потрібну комбінацію</div></div>
+      ${commandPanel()}
       <div class="panel"><h2>Оновлення</h2>
-        <div class="srow"><div style="min-width:0">
+        <div class="srow"><div class="sl">
             <div class="lab">Версія ${state.version ? "v" + esc(state.version) : "—"}</div>
             <div class="hint">KuubWave перевіряє оновлення сам при запуску й пропонує встановити нову версію</div></div>
           <button class="btn ghost" id="chkUpdBtn">Перевірити оновлення</button></div></div>`,
     floating: floatingPanel(),
     mic: `
       <div class="panel"><h2>Мікрофон</h2>
-        <div class="srow"><div style="min-width:0"><div class="lab">Пристрій вводу</div><div class="hint">Джерело звуку для диктування</div></div>
+        <div class="srow"><div class="sl"><div class="lab">Пристрій вводу</div><div class="hint">Джерело звуку для диктування</div></div>
           <select class="sel" id="selMic" aria-label="Пристрій вводу"></select></div>
         ${toggleRow("Відкривати мікрофон лише під час запису", "Прибирає значок мікрофона в треї; можливе зрізання перших мілісекунд фрази", "micOnDemand")}
         ${toggleRow("Глушити інші звуки під час запису", "Музика, відео та сповіщення стихають, поки ви диктуєте, і вмикаються назад після відпускання клавіші", "muteOthers")}
@@ -930,13 +1192,21 @@ function renderSettings(el) {
           ${sttModeCard("cloud", "Хмара", ICON.cloud, "Швидко · без GPU · свій ключ")}
         </div>
         <div id="sttLocal"${s.sttBackend === "cloud" ? " hidden" : ""}>
-          <div class="mcards" id="mcards" role="radiogroup" aria-label="Модель розпізнавання" style="margin-top:14px"></div>
-          <div class="srow" style="margin-top:6px"><div style="min-width:0"><div class="lab">Пристрій обробки</div>
+          <div class="srow gt"><div class="sl">
+              <div class="lab lab-h">Рушій${hbtn("hlp-engine")}</div>
+              <div class="hint" id="engHint"></div>
+              ${hnote("hlp-engine", "Whisper — перевірений рушій з українською донавченою моделлю, словником-підказками й захистом від русизмів. Parakeet (NVIDIA) — у кілька разів швидший за точності, близької до Whisper; словник-підказки на нього не діють, але виправлення термінів зі словника після розпізнавання працює. Якщо Parakeet недоступний — диктовка сама піде через Whisper.")}</div>
+            <div class="seg" role="group" aria-label="Рушій розпізнавання">
+              <button data-eng="whisper">Whisper</button>
+              <button data-eng="parakeet">Parakeet</button></div></div>
+          <div id="engPk"></div>
+          <div class="mcards gt" id="mcards" role="radiogroup" aria-label="Модель розпізнавання"></div>
+          <div class="srow" style="margin-top:6px"><div class="sl"><div class="lab">Пристрій обробки</div>
               <div class="hint">Де рахувати модель: GPU швидко, CPU повільний запасний. Уся обробка локально</div></div>
             <select class="sel" id="selGpu" aria-label="Пристрій обробки">
               <option value="cuda">${esc(state.gpu)} (GPU)</option>
               <option value="cpu">CPU (запасний варіант)</option></select></div></div>
-        <div id="sttCloud"${s.sttBackend === "local" ? " hidden" : ""} style="margin-top:14px">${sttCloudHtml()}</div>
+        <div id="sttCloud" class="gt"${s.sttBackend === "local" ? " hidden" : ""}>${sttCloudHtml()}</div>
       </div>`,
     ai: `
       <div class="panel"><h2>Мова та пунктуація</h2>
@@ -946,33 +1216,39 @@ function renderSettings(el) {
       <div class="panel"><h2>Полірування тексту (AI)</h2>
         <div class="desc">Прибирає слова-паразити, розставляє пунктуацію. Виконується після розпізнавання</div>
         <div class="cloud-warn" role="note" style="margin:2px 0 6px">${svg(ICON.warn, 15)}<span>У режимі Groq текст диктовок іде на сервери Groq для полірування. Ollama — локально.</span></div>
-        <div class="srow"><div style="min-width:0"><div class="lab lab-h">Режим${hbtn("hlp-ai")}</div>
+        <div class="srow"><div class="sl"><div class="lab lab-h">Режим${hbtn("hlp-ai")}</div>
             <div class="hint">Ollama — локально й безкоштовно. Groq — швидко, але текст іде на чужий сервер</div>
             ${hnote("hlp-ai", "Ollama працює просто на вашому ПК — безкоштовно й приватно, текст нікуди не йде. Groq — це хмара: швидше й якісніше, але кожна диктовка вирушає на сервери Groq.")}</div>
           <div class="seg" role="group" aria-label="Режим полірування">
             <button data-llm="off" class="${s.llm === "off" ? "on" : ""}" aria-pressed="${s.llm === "off"}">Вимкнено</button>
             <button data-llm="ollama" class="${s.llm === "ollama" ? "on" : ""}" aria-pressed="${s.llm === "ollama"}">Ollama</button>
             <button data-llm="groq" class="${s.llm === "groq" ? "on" : ""}" aria-pressed="${s.llm === "groq"}">Groq</button></div></div>
-        <div id="llmOllama" class="srow"><div style="min-width:0"><div class="lab">Модель Ollama</div>
+        <div id="llmOllama" class="srow"><div class="sl"><div class="lab">Модель Ollama</div>
             <div class="hint">Має бути завантажена: <span class="mono">ollama pull ${esc(s.ollamaModel || "qwen2.5:7b")}</span></div></div>
           <input class="inp mono" id="ollamaModel" value="${esc(s.ollamaModel || "")}" placeholder="qwen2.5:7b" aria-label="Модель Ollama"></div>
         <div id="llmGroq">
-          <div class="srow"><div style="min-width:0"><div class="lab">Ключ Groq API</div>
+          <div class="srow"><div class="sl"><div class="lab">Ключ Groq API</div>
               <div class="hint">Безкоштовний тариф на console.groq.com</div></div>
             <div class="key-wrap">
               <input class="inp mono" id="groqKey" type="password" value="${esc(s.groqKey || "")}" placeholder="gsk_…" aria-label="Ключ Groq API">
               <button class="mini" id="keyEye" aria-label="Показати ключ"></button></div></div>
-          <div class="srow"><div style="min-width:0"><div class="lab">Модель Groq</div>
+          <div class="srow"><div class="sl"><div class="lab">Модель Groq</div>
               <div class="hint">openai/gpt-oss-20b — швидка й безкоштовна. Список: console.groq.com/docs/models</div></div>
             <input class="inp mono" id="groqModel" value="${esc(s.groqModel || "")}" placeholder="openai/gpt-oss-20b" aria-label="Модель Groq"></div>
         </div>
-        <div id="llmPromptBlock" style="padding-top:15px;border-top:1px solid var(--line)">
-          <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:10px;flex-wrap:wrap">
-            <div><div class="lab">Інструкція для полірування</div>
+        <div id="llmPromptBlock" class="sep">
+          <div class="subhead">
+            <div class="sl"><div class="lab">Інструкція для полірування</div>
               <div class="hint">Що саме AI робить з розпізнаним текстом. Порожнє — типова інструкція</div></div>
-            <button class="btn ghost" id="llmPromptReset" style="padding:8px 13px;font-size:12px">Скинути до типового</button></div>
+            <button class="btn ghost sm" id="llmPromptReset">Скинути до типового</button></div>
           <textarea class="ta mono" id="llmPrompt" rows="5" placeholder="Типова інструкція" aria-label="Інструкція для полірування">${esc(s.llmPrompt || s.llmPromptDefault || "")}</textarea>
-        </div></div>`,
+        </div>
+        <div id="appStylesBlock" class="sep gt">
+          ${toggleRow("Стиль під програму", "AI підлаштовує тон під вікно, куди йде текст. Інші програми — як зараз", "appStylesEnabled",
+            ["hlp-appstyles", "KuubWave дивиться, в яку програму вставляється текст, і додає до інструкції коротку підказку: у месенджері — розмовно, у пошті — акуратно, у коді й терміналі — нічого не перефразовувати. Ваша інструкція вище лишається основною."])}
+          <div class="style-list" id="appStylesList"${s.appStylesEnabled ? "" : " hidden"}>${appStylesListHtml()}</div>
+        </div>
+        ${styleProfileHtml()}</div>`,
     license: `
       <div class="panel"><h2>Ліцензія</h2>
         <div class="desc">Ключ активується один раз і зберігається на цьому пристрої</div>
@@ -985,7 +1261,7 @@ function renderSettings(el) {
       <div class="panel"><h2>Приватність</h2>
         <div class="note ${s.llm === "groq" ? "warn" : "ok"}" id="privacyNote"></div></div>
       <div class="panel"><h2>Знайомство</h2>
-        <div class="srow" style="border:none;padding-bottom:0"><div style="min-width:0">
+        <div class="srow" style="border:none;padding-bottom:0"><div class="sl">
             <div class="lab">Пройти знайомство</div>
             <div class="hint">Показати вступний тур ще раз — крок за кроком. Не змінює ваших налаштувань.</div></div>
           <button class="btn ghost" id="obReplay">Пройти знайомство</button></div></div>`,
@@ -1014,17 +1290,30 @@ function renderSettings(el) {
     };
   });
 
+  // Smart Turn only does anything in hands-free mode: with hands-free off the
+  // row reads as dependent (dimmed, inert) instead of saving a no-op change.
+  const syncDependents = () => {
+    const st = el.querySelector('.tg[data-key="smartTurn"]');
+    if (!st) return;
+    const dep = !s.handsFree;
+    st.closest(".srow").classList.toggle("off", dep);
+    st.setAttribute("aria-disabled", dep ? "true" : "false");
+  };
+  syncDependents();
   // every toggle in every pane goes through the same save_settings payload
   el.querySelectorAll(".tg[data-key]").forEach((t) => t.onclick = () => {
     const k = t.dataset.key;
+    if (t.getAttribute("aria-disabled") === "true") return;
     s[k] = !s[k];
     t.classList.toggle("on", s[k]);
     t.setAttribute("aria-checked", s[k] ? "true" : "false");
+    if (k === "handsFree") syncDependents();
     saveSettings();
   });
 
   if (tab === "general") {
     el.querySelector("#hotkeyBtn").onclick = captureHotkey;
+    el.querySelector("#cmdHotkeyBtn").onclick = captureCommandHotkey;
     const cu = el.querySelector("#chkUpdBtn");
     if (cu) cu.onclick = (e) => checkUpdateManual(e.currentTarget);
   }
@@ -1041,7 +1330,12 @@ function renderSettings(el) {
     renderModelList(el.querySelector("#mcards"));
     const selG = el.querySelector("#selGpu");
     selG.value = s.device || "cuda";
-    selG.onchange = () => { s.device = selG.value; saveSettings(); };
+    selG.onchange = () => {
+      s.device = selG.value; saveSettings();
+      // int8 on CPU vs fp32 on GPU: the download size/installed flag may change
+      refreshParakeet(el);
+    };
+    bindEnginePane(el);
     bindSttPane(el);
     bindAiPane(el);
   }
@@ -1121,6 +1415,10 @@ function bindAiPane(el) {
     // the corrector instruction applies to both providers, so show it whenever
     // polishing is on at all
     el.querySelector("#llmPromptBlock").style.display = s.llm === "off" ? "none" : "";
+    // the per-app style only shapes the polish prompt, so it goes with it
+    el.querySelector("#appStylesBlock").style.display = s.llm === "off" ? "none" : "";
+    // the learned style is also only a polish-prompt addition
+    el.querySelector("#styleProfileBlock").style.display = s.llm === "off" ? "none" : "";
     el.querySelectorAll(".seg [data-llm]").forEach((b) => {
       const on = b.dataset.llm === s.llm;
       b.classList.toggle("on", on);
@@ -1128,7 +1426,33 @@ function bindAiPane(el) {
     });
   };
   syncLlm();
-  const setLlm = (v) => { s.llm = v; syncLlm(); saveSettings(); };
+  // the shared toggle handler (renderSettings) saves; this only shows/hides the
+  // category list to match, without re-rendering the whole pane
+  const stTg = el.querySelector('.tg[data-key="appStylesEnabled"]');
+  const stSave = stTg.onclick;
+  stTg.onclick = () => { stSave(); el.querySelector("#appStylesList").hidden = !s.appStylesEnabled; };
+  const spTg = el.querySelector('.tg[data-key="styleProfileEnabled"]');
+  const spSave = spTg.onclick;
+  spTg.onclick = () => { spSave(); el.querySelector("#spWrap").hidden = !s.styleProfileEnabled; };
+  const spBtn = el.querySelector("#spRebuild");
+  spBtn.onclick = async () => {
+    spBtn.disabled = true;
+    const was = spBtn.textContent;
+    spBtn.textContent = "Рахую…";
+    let res = null;
+    try { res = await api("rebuild_style_profile"); } catch (e) { res = null; }
+    spBtn.disabled = false;
+    spBtn.textContent = was;
+    if (!res || !res.ok) { toast((res && res.error) || "Не вдалося оновити профіль"); return; }
+    s.styleProfile = { traits: res.traits || [], builtAt: res.builtAt || "",
+                       samples: res.samples || 0, text: res.text || "" };
+    el.querySelector("#spTraits").innerHTML = styleTraitsHtml();
+    el.querySelector("#spMeta").textContent = styleMetaText();
+    el.querySelector("#spText").textContent = s.styleProfile.text;
+    el.querySelector("#spTextBox").hidden = !s.styleProfile.text;
+    toast("Профіль стилю оновлено");
+  };
+  const setLlm =(v) => { s.llm = v; syncLlm(); saveSettings(); };
   el.querySelectorAll(".seg [data-llm]").forEach((b) => b.onclick = () => {
     const v = b.dataset.llm;
     if (v === s.llm) return;
@@ -1237,6 +1561,76 @@ function bindSttCloud(el) {
     }
   };
 }
+// ---- local engine switch (Whisper | Parakeet) ----
+// Parakeet is optional: the backend falls back to Whisper on its own whenever it
+// can't run, so this pane only has to explain the state and offer the download.
+function engineHintText() {
+  return state.settings.localEngine === "parakeet"
+    ? "Parakeet — швидший; моделі Whisper нижче лишаються запасним варіантом"
+    : "Whisper — з українською моделлю, словником і захистом від русизмів";
+}
+function enginePkHtml() {
+  const p = state.parakeet || {};
+  if (state.settings.localEngine !== "parakeet") return "";
+  if (!p.available) {
+    return `<div class="note warn" style="margin-top:6px">${svg(ICON.warn, 15)}У цій збірці немає Parakeet — диктовка йде через Whisper</div>`;
+  }
+  if (p.installed) return "";
+  return `<div class="srow"><div class="sl"><div class="lab">Модель Parakeet не завантажена</div>
+      <div class="hint" id="pkDlTx">Завантаження · ${esc(p.size || "")}. Поки її немає, диктовка йде через Whisper</div></div>
+    <button class="btn ghost" id="pkDl">Завантажити</button></div>`;
+}
+function syncEngine(el) {
+  const s = state.settings;
+  el.querySelectorAll(".seg [data-eng]").forEach((b) => {
+    const on = b.dataset.eng === s.localEngine;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-pressed", on ? "true" : "false");
+  });
+  const hint = el.querySelector("#engHint");
+  if (hint) hint.textContent = engineHintText();
+  const pk = el.querySelector("#engPk");
+  if (!pk) return;
+  pk.innerHTML = enginePkHtml();
+  const dl = pk.querySelector("#pkDl");
+  if (dl) dl.onclick = async () => {
+    dl.disabled = true; dl.textContent = "Качається…";
+    const r = await api("download_model", "parakeet");
+    if (r && r.ok === false) { toast(r.error || "не вдалося"); dl.disabled = false; dl.textContent = "Завантажити"; return; }
+    pollParakeetDownload(el);
+  };
+}
+async function refreshParakeet(el) {
+  state.parakeet = (await api("parakeet_status")) || state.parakeet;
+  syncEngine(el);
+}
+let pkDlTimer = null;
+function pollParakeetDownload(el) {
+  if (pkDlTimer) return;
+  pkDlTimer = setInterval(async () => {
+    const d = await api("get_download");
+    if (!document.getElementById("engPk")) { clearInterval(pkDlTimer); pkDlTimer = null; return; }
+    if (d && d.downloading) {
+      const tx = document.getElementById("pkDlTx");
+      if (tx) tx.textContent = d.mb ? `Качається… ${fmtMb(d.mb)}` : "Качається…";
+    } else {
+      clearInterval(pkDlTimer); pkDlTimer = null;
+      if (d && d.error) toast("Не вдалося завантажити модель: " + d.error);
+      await refreshParakeet(el);
+    }
+  }, 700);
+}
+function bindEnginePane(el) {
+  const s = state.settings;
+  if (s.localEngine !== "parakeet") s.localEngine = "whisper";
+  syncEngine(el);
+  el.querySelectorAll(".seg [data-eng]").forEach((b) => b.onclick = () => {
+    if (b.dataset.eng === s.localEngine) return;
+    s.localEngine = b.dataset.eng;
+    syncEngine(el);
+    saveSettings();
+  });
+}
 function bindSttPane(el) {
   const cards = [...el.querySelectorAll("#sttModes [data-stt]")];
   cards.forEach((b) => {
@@ -1267,7 +1661,7 @@ function renderModelList(host) {
     const tags = [m.en ? "тільки англійська" : "", m.note].filter(Boolean).map(esc).join(" · ");
     let bottom = "";
     if (m.installed && !m.active) bottom = `<button class="mdel" data-act="del" data-id="${esc(m.id)}">${svg(ICON.trash, 12)}Видалити з диска</button>`;
-    else if (!m.installed) bottom = `<div class="dl">↓ Завантажити</div>`;
+    else if (!m.installed) bottom = `<div class="dl">${svg(ICON.download, 12)}Завантажити</div>`;
     const status = m.active ? "Активна" : (m.installed ? "на диску" : "не завантажена");
     return `<div class="mcard${m.active ? " on" : ""}" role="radio" aria-checked="${m.active ? "true" : "false"}"
       aria-label="${esc(m.label)} — ${status}" tabindex="${i === focusIdx ? 0 : -1}" data-mid="${esc(m.id)}">
@@ -1415,6 +1809,21 @@ async function captureHotkey() {
   paintTopHint();
 }
 
+// The command key refuses the dictation key and lone modifiers (see
+// webview_app.capture_command_hotkey), so it reports an error the user must see.
+async function captureCommandHotkey() {
+  const btn = document.getElementById("cmdHotkeyBtn");
+  const cap = document.getElementById("cmdCap");
+  btn.classList.remove("ghost"); btn.classList.add("pri");
+  btn.textContent = "Слухаю…";
+  const r = await api("capture_command_hotkey") || {};
+  if (typeof r.label === "string") state.commandHotkey = r.label;
+  btn.classList.remove("pri"); btn.classList.add("ghost");
+  btn.textContent = "Змінити";
+  if (cap) cap.textContent = state.commandHotkey || "не призначено";
+  if (r.error) toast(r.error);
+}
+
 // ================= FLOATING PANEL (Settings → Панель) =================
 // One placement truth: percentages of the FREE space inside the screen
 // (0 = flush to the start edge, 50 = centred, 100 = flush to the end edge).
@@ -1504,7 +1913,7 @@ function floatingPanel() {
   }).join("");
   return `<div class="panel"><h2>Плаваюча панель</h2>
     <div class="desc">Маленький індикатор запису, який лежить поверх усіх вікон, поки ви диктуєте</div>
-    <div class="srow" style="padding-top:0"><div style="min-width:0">
+    <div class="srow" style="padding-top:0"><div class="sl">
         <div class="lab">Показувати панель</div><div class="hint">Індикатор запису поверх усіх вікон</div></div>
       <button class="tg ${s.floatingPanel ? "on" : ""}" role="switch" aria-checked="${s.floatingPanel ? "true" : "false"}"
         aria-label="Показувати плаваючу панель" aria-controls="fpBody" id="fpMaster"><span class="th"></span></button></div>
@@ -2052,8 +2461,21 @@ async function tickStatus() {
   if (!st || st === state.homeState) return;
   // respect a manual preview hold; don't yank the hero away from the user
   if (Date.now() < (state.manualHoldUntil || 0)) return;
+  const prev = state.homeState;
   if (state.page === "home") setHomeState(st);
   else state.homeState = st;
+  // a dictation just landed (…-> idle): pull the new row into the open window so
+  // the History/Home list refreshes live instead of only after a restart
+  if (st === "idle" && (prev === "processing" || prev === "recording")) refreshFeed();
+}
+async function refreshFeed() {
+  const f = await api("history_feed");
+  if (!f) return;
+  if (f.stats) state.stats = f.stats;
+  if (f.recent) state.recent = f.recent;
+  if (f.history) state.history = f.history;
+  // only repaint when the user is actually looking at a list that changed
+  if (state.page === "home" || state.page === "history") render();
 }
 let micWarnTicks = 0;
 function pollStatus() {

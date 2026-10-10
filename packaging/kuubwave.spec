@@ -22,11 +22,26 @@ hiddenimports = ["comtypes", "pystray._win32", "cuda_setup", "webview_app",
                  # found anyway; mic_level is imported lazily inside main(), so
                  # static analysis misses it and the packaged build would silently
                  # lose the "raise the mic level" button. Both listed explicitly.
-                 "text_fixes", "mic_level"]
+                 # term_suggest is imported lazily by webview_app for the same
+                 # reason ("Знайти проблемні слова").
+                 "text_fixes", "mic_level", "app_styles", "term_suggest",
+                 "latency", "style_profile"]
 
-# pull in data files / dylibs / submodules for the tricky native packages
+# pull in data files / dylibs / submodules for the tricky native packages.
+# onnx_asr + onnxruntime are for the optional Parakeet engine: flow.py imports
+# onnx_asr only inside load_parakeet(), so static analysis never sees it, and
+# onnx_asr loads its mel-preprocessor graphs (onnx_asr/preprocessors/data/*.onnx)
+# from package data — collect_all brings both the submodules and those files.
+# onnxruntime is listed explicitly because faster_whisper also imports it only
+# lazily (Silero VAD); its DLLs must be in the bundle for either feature. If the
+# packages are missing at build time the try/except skips them and the build
+# simply ships without Parakeet (the app then falls back to Whisper).
+# Smart Turn (hands-free end-of-turn) needs nothing extra here: it runs on the
+# same onnxruntime, takes its log-mel from faster_whisper.feature_extractor
+# (pure numpy, covered by collect_all("faster_whisper")) and fetches its 8 MB
+# onnx at runtime via huggingface_hub into the models cache, not the bundle.
 for pkg in ("webview", "ctranslate2", "faster_whisper", "sounddevice",
-            "tokenizers", "huggingface_hub", "av"):
+            "tokenizers", "huggingface_hub", "av", "onnxruntime", "onnx_asr"):
     try:
         d, b, h = collect_all(pkg)
         datas += d

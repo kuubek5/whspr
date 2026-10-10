@@ -46,6 +46,7 @@ typography:
     fontSize: "0.85rem"
     fontWeight: 400
 rounded:
+  xs: "8px"
   sm: "12px"
   md: "16px"
   lg: "22px"
