@@ -438,15 +438,16 @@ DEFAULTS = {
     # No history text ever goes into it (validated on build and on every read),
     # and the history itself is never sent anywhere. {} = no profile yet, which
     # makes the whole feature a no-op even with the toggle on.
-    # OFF by default, measured (2026-10-10, gpt-oss-20b/low, 28 + a second
-    # batch of the user's real raw takes, polish with vs without the profile):
-    # the with-profile output differed from the without one on 11 of 28, but
-    # the SAME prompt run twice differed on 10 of 28 — i.e. the profile's
-    # effect is inside run-to-run noise. The one directional gain was merged
-    # sentences (3 -> 0) with no new errors in any arm (no «ти» -> «ви», no
-    # Russian, no guard trips, no lost Latin terms). Not worth ~150 extra
-    # tokens on every polish of a free-tier key (the A/B itself tripped the
-    # 8000 tokens/min limit); the user can switch it on in Settings.
+    # OFF by default, measured (2026-10-10, gpt-oss-20b/low, 28 of the user's
+    # real raw takes polished three times: without, with, without again; a
+    # planned 60 shrank to 28 because the free-tier key hit 429s and a second
+    # batch got nothing at all): the with-profile output differed from the
+    # without one on 11 of 28, but the SAME prompt run twice differed on 10
+    # of 28 — i.e. the profile's effect is inside run-to-run noise. The one
+    # directional gain was merged sentences (3 -> 0) with no new errors in any
+    # arm (no «ти» -> «ви», no Russian, no guard trips, no lost Latin terms).
+    # Not worth ~150 extra tokens on every polish of a free-tier key; the
+    # user can switch it on in Settings and judge for themselves.
     "style_profile_enabled": False,
     # {"text", "traits": [{id, label}], "stats": {counts}, "samples",
     #  "built_at": "YYYY-MM-DD HH:MM", "build_s"} — written by
