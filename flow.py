@@ -180,7 +180,7 @@ import style_profile
 import latency
 
 # ---------------- Config ----------------
-APP_VERSION = "1.4.12"  # single source of truth; build.ps1 feeds it to Inno
+APP_VERSION = "1.4.13"  # single source of truth; build.ps1 feeds it to Inno
 GITHUB_REPO = "kuubek5/kuubwave"  # public releases-only repo the updater polls
 # Cloudflare (in front of Groq) 403s urllib's default agent — send a browser one
 HTTP_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -370,6 +370,11 @@ DEFAULTS = {
     "hands_free": False,
     "silence_stop_s": 2.2,   # silence this long ends a hands-free take
     "max_utterance_s": 60,   # hard cap so a noisy mic can't record forever
+    # Hands-free take with no speech at all for this long (VAD never armed):
+    # drop it instead of recording to the 60 s cap. In the log all 8 cap-stops
+    # had heard 0.0 s of speech, and 4 of them pasted a phantom "Дякую." that
+    # Whisper made up from a minute of room noise. 0 = off.
+    "no_speech_cancel_s": 10,
     # What decides "the user has stopped talking" in hands-free mode:
     #   "vad" — Silero speech probability (the onnx model faster-whisper already
     #           ships). It scores whether a frame SOUNDS like speech, so it does
@@ -474,6 +479,12 @@ DEFAULTS = {
     # "беремо", "в" -> "у"), gpt-oss-120b was slower and changed more. Sent
     # only to openai/gpt-oss-* (see _groq_reasoning_effort); "" = Groq default.
     "groq_reasoning_effort": "low",
+    # Spoken self-correction ("у п'ятницю, ні, в суботу" -> "у суботу"), part of
+    # the LLM polish. Runs only on takes with a correction marker, on its own
+    # Groq model: the default 20b deleted real words in look-alike sentences,
+    # 120b did not (see SELF_CORRECTION_RULE). Ollama uses ollama_model.
+    "self_correction": True,
+    "self_correction_model": "openai/gpt-oss-120b",
     # Skip the LLM for a short take Whisper already punctuated (rule and its
     # exceptions: text_fixes.polish_skip_reason). Measured 2026-10-09 on 180
     # of the user's real takes run through the polish: of the 78 the rule
@@ -582,6 +593,29 @@ LLM_PROMPT = (
     "Збережи мову, зміст і стиль. Ніколи не став запитань і не проси надати "
     "текст. Якщо сумніваєшся — поверни вхідний рядок без змін. Поверни ЛИШЕ "
     "виправлений текст без пояснень і лапок."
+)
+# Self-correction ("у п'ятницю, ні, в суботу" -> "у суботу"). Appended to the
+# polish prompt ONLY for takes that contain a correction marker
+# (text_fixes.has_correction_marker): the rule tells the model it may delete
+# words, and no take without a marker should ever be exposed to that. Measured
+# on a 23-phrase set (11 corrections, 12 look-alikes such as "ні, я не хочу",
+# "це правда, тобто я так думаю"): gpt-oss-20b deleted real content in 2 of the
+# look-alikes; gpt-oss-120b in none over two runs and fixed 8 of 11, hence
+# self_correction_model. text_fixes.self_correction_ok vets every answer.
+SELF_CORRECTION_RULE = (
+    "Єдиний виняток з правила \"НЕ змінюй самі слова\" — САМОВИПРАВЛЕННЯ: користувач "
+    "щось сказав, тоді маркер виправлення (\"ні\", \"ой\", \"ой ні\", "
+    "\"тобто\", \"вірніше\", \"точніше\", \"в сенсі\", \"no wait\", "
+    "\"I mean\", \"actually\") і ОДРАЗУ інший варіант того самого (інший день, "
+    "час, число, ім'я, місце, слово). Тоді залиш лише новий варіант, а "
+    "скасований фрагмент і маркер прибери: \"зустрінемось у п'ятницю, ні, в "
+    "суботу\" -> \"Зустрінемось у суботу.\"; \"надішли Андрію, тобто Олегу\" -> "
+    "\"Надішли Олегу.\". Маркер і скасований фрагмент прибирай ТІЛЬКИ разом: "
+    "або обидва, або жодного — ніколи не лишай обидва варіанти поруч. Якщо "
+    "маркер нічого щойно сказаного не замінює, а є звичайною частиною речення "
+    "(\"ні, я не хочу\", \"він сказав ні\", \"тобто тепер можна "
+    "відпочити\", \"ой, як гарно\", \"I mean it\") — нічого не видаляй. "
+    "Сумніваєшся — нічого не видаляй."
 )
 # -----------------------------------------
 
@@ -1213,10 +1247,12 @@ def _groq_reasoning_effort(model: str, key: str = "groq_reasoning_effort") -> st
     return None
 
 
-def _llm_request(system_prompt: str, user_text: str, label: str) -> str | None:
+def _llm_request(system_prompt: str, user_text: str, label: str,
+                 groq_model: str | None = None) -> str | None:
     """One chat call to the configured provider. Returns the reply, or None on
     any failure (with a shared back-off so an unreachable provider doesn't add a
-    connection timeout to every request)."""
+    connection timeout to every request). `groq_model` overrides the configured
+    Groq model for this one call (ignored for Ollama)."""
     mode = config.get("llm", "off")
     if mode == "off" or not user_text:
         return None
@@ -1232,7 +1268,7 @@ def _llm_request(system_prompt: str, user_text: str, label: str) -> str | None:
             if not key:
                 return None
             url = "https://api.groq.com/openai/v1/chat/completions"
-            model = config.get("groq_model", DEFAULTS["groq_model"])
+            model = groq_model or config.get("groq_model", DEFAULTS["groq_model"])
             headers["Authorization"] = f"Bearer {key}"
         elif mode == "ollama":
             # 127.0.0.1, not localhost: the latter resolves to ::1 first and
@@ -1280,7 +1316,8 @@ def style_profile_prompt(cfg: dict | None = None) -> str:
         return ""
 
 
-def compose_polish_prompt(style: str | None = None) -> str:
+def compose_polish_prompt(style: str | None = None,
+                          correction: bool = False) -> str:
     """System prompt for one polish: base -> style profile -> per-app style.
 
     Order matters. The base rules (custom llm_prompt or LLM_PROMPT) come first
@@ -1293,6 +1330,10 @@ def compose_polish_prompt(style: str | None = None) -> str:
     # the admin can tune the corrector from Settings without touching code; blank
     # falls back to the shipped default (and picks up its future improvements).
     prompt = (config.get("llm_prompt") or "").strip() or LLM_PROMPT
+    # right after the base rules it is an exception to; only for takes that
+    # carry a correction marker (see SELF_CORRECTION_RULE)
+    if correction:
+        prompt = f"{prompt}\n\n{SELF_CORRECTION_RULE}"
     habits = style_profile_prompt(config)
     if habits:
         prompt = f"{prompt}\n\n{habits}"
@@ -1354,6 +1395,20 @@ def llm_polish(text: str, lang: str, style: str | None = None) -> str:
     fall back to the raw text when it looks like the model answered rather than
     corrected. The prompt hardening reduces how often this happens; the guard is
     what makes it safe when it happens anyway."""
+    # Self-correction path: only a take with a correction marker gets the rule
+    # that lets the model delete words, on the stronger model, and its answer
+    # must pass self_correction_ok. A rejected answer falls through to the
+    # ordinary polish below, exactly as if the feature were off.
+    if (config.get("self_correction", True)
+            and text_fixes.has_correction_marker(text)):
+        out = _llm_request(compose_polish_prompt(style, correction=True), text,
+                           "polish", config.get("self_correction_model")
+                           or DEFAULTS["self_correction_model"])
+        if (out and text_fixes.polish_is_safe(text, out)
+                and text_fixes.self_correction_ok(text, out)):
+            return out
+        if out:
+            log(f"self-correction rejected, plain polish instead: {out!r}")
     # base prompt + the user's learned habits + per-app style; see
     # compose_polish_prompt for the order and why the per-app style wins
     prompt = compose_polish_prompt(style)
@@ -4014,6 +4069,9 @@ ASYNC_REWRITE_MAX_CHARS = 400
 # 15 s: past this the user has almost certainly moved on, and last_output is no
 # longer good evidence that our text is still sitting untouched under the caret.
 ASYNC_REWRITE_WINDOW_S = 15.0
+# How long a finished polish waits for the model lock (held for a moment by the
+# live preview / speculative decode of a take now recording) before giving up.
+ASYNC_LOCK_WAIT_S = 3.0
 
 
 def _schedule_llm_polish(raw: str, lang: str, target_hwnd: int,
@@ -4031,9 +4089,14 @@ def _schedule_llm_polish(raw: str, lang: str, target_hwnd: int,
 
       * the polished text actually differs from what we pasted;
       * it is short enough to retype without a visible storm of keystrokes;
-      * no recording or transcription is in flight — taken as the real
-        _transcribe_lock, not a flag, so a take that starts mid-check cannot
-        interleave its own keystrokes with ours;
+      * no transcription is in flight — taken as the real _transcribe_lock,
+        not a flag, so a take that finishes mid-check cannot interleave its own
+        keystrokes with ours. A take that is merely RECORDING types nothing until
+        it ends, so it no longer blocks the rewrite: 25 of the user's 211 logged
+        takes lost their polish to "recording again" — the next sentence started
+        before Groq answered for the last one;
+      * no modifier is held: a combo hotkey held down for the next take would
+        turn our Backspace into Alt+Backspace (undo) or Ctrl+Backspace;
       * state['last_output'] is still character-for-character the text we pasted,
         into the same window — if a later dictation, a voice command or another
         rewrite has landed since, ours is stale;
@@ -4058,14 +4121,16 @@ def _schedule_llm_polish(raw: str, lang: str, target_hwnd: int,
         if len(polished) > ASYNC_REWRITE_MAX_CHARS:
             log("async polish skipped — result too long to retype safely")
             return
-        # non-blocking: if a dictation is already running, its keystrokes own the
-        # keyboard and ours would interleave. Skipping is the safe answer.
-        if not _transcribe_lock.acquire(blocking=False):
+        # A short wait, not a skip: the lock is also taken for a moment by the
+        # live preview and the speculative decode of a take now recording. A
+        # take that really is transcribing pastes before releasing the lock,
+        # and the last_output check below then sees our text is gone.
+        if not _transcribe_lock.acquire(timeout=ASYNC_LOCK_WAIT_S):
             log("async polish skipped — another take is in flight")
             return
         try:
-            if state.get("recording"):
-                log("async polish skipped — recording again")
+            if _modifiers_held():
+                log("async polish skipped — modifier key held")
                 return
             last = state.get("last_output") or {}
             if last.get("text") != raw or last.get("hwnd") != target_hwnd:
@@ -4711,6 +4776,22 @@ def start_listener() -> "_Listeners":
         if config.get("mic_on_demand"):
             close_stream()
 
+    def cancel_rec(why: str):
+        """End the take WITHOUT transcribing it: nothing is pasted, no history.
+        Same teardown as stop_rec otherwise."""
+        if not state["recording"]:
+            return
+        state["recording"] = False
+        duck_others(False)
+        take_audio()  # discard
+        state["take_kind"] = "dictate"
+        state.pop("start_hwnd", None)
+        log(f"take cancelled — {why}")
+        set_status("idle")
+        _overlay_flash("не почув голосу", False)
+        if config.get("mic_on_demand"):
+            close_stream()
+
     def silence_watch():
         """Hands-free: stop recording once the user has stopped talking. The
         decision lives in VadAutoStop / RmsAutoStop (see make_autostop); this
@@ -4719,6 +4800,7 @@ def start_listener() -> "_Listeners":
         time.sleep(0.3)  # let the stream fill before judging anything
         gap = float(config.get("silence_stop_s", 1.5))
         hard_max = config.get("max_utterance_s", 60)
+        no_speech_s = float(config.get("no_speech_cancel_s", 10) or 0)
         t_start = time.time()
         dec = make_autostop(gap)
         vad = _vad_model if dec.name == "vad" else None
@@ -4763,6 +4845,12 @@ def start_listener() -> "_Listeners":
                 threading.Thread(target=_speculate,
                                  args=(spec_key, snap_pre, snap_cur),
                                  daemon=True).start()
+            # VAD only: it alone can say "not one word yet" (the rms engine
+            # would count room noise as speech on a boosted quiet mic)
+            if (vad is not None and no_speech_s > 0 and not dec.armed
+                    and time.time() - t_start >= no_speech_s):
+                cancel_rec(f"no speech in {no_speech_s:g}s ({dec.describe()})")
+                return
             if time.time() - t_start >= hard_max:
                 log(f"hands-free: {hard_max}s cap -> auto stop ({dec.describe()})")
                 stop_rec()

@@ -22,6 +22,7 @@ microphone or a config file.
 """
 from __future__ import annotations
 
+import collections
 import re
 from dataclasses import dataclass
 from difflib import SequenceMatcher
@@ -639,6 +640,63 @@ _POLISH_COMMA_OPENERS = frozenset({
 })
 
 
+# Words that can open a spoken self-correction ("у п'ятницю, НІ, в суботу").
+# Multi-word markers are represented by their distinctive word ("в сенсі" ->
+# "сенсі", "no wait" -> "wait", "I mean" -> "mean"). A hit only means the take
+# MAY contain a correction; the LLM decides, and self_correction_ok vets it.
+_CORRECTION_MARKERS = frozenset({
+    "ні", "ой", "тобто", "вірніше", "точніше", "сенсі",
+    "no", "wait", "mean", "actually",
+})
+# glue that belongs to a multi-word marker ("в сенсі", "I mean", "ой ні") and
+# disappears with it
+_CORRECTION_GLUE = frozenset({"в", "у", "i"})
+
+
+def _words(text: str) -> list[str]:
+    return [w for w in (_fold(t) for t in _TOKEN_RE.findall(text or ""))
+            if _IS_WORD.match(w) and any(c.isalpha() or c.isdigit() for c in w)]
+
+
+def has_correction_marker(text: str) -> bool:
+    """True if the take contains a self-correction marker word with something
+    on both sides of it (a marker opening or closing the take corrects nothing:
+    "ні, я не хочу", "скажи йому ні")."""
+    words = _words(text)
+    return any(w in _CORRECTION_MARKERS for w in words[1:-1])
+
+
+def self_correction_ok(raw: str, polished: str) -> bool:
+    """Vet a polish that ran with the self-correction rule. False = discard it.
+
+    A correction deletes the cancelled fragment AND the marker together. Two
+    shapes are rejected:
+
+      1. Only marker words went missing: "для Марини, ой, для Ірини" ->
+         "для Марини, для Ірини" — both variants left side by side, which reads
+         worse than the raw take.
+      2. More than half of the take's words went missing: no real correction
+         cancels most of what was said; that is the model rewriting the take.
+
+    Fillers and word-form changes are ignored (the base prompt already
+    governs those); only words present in raw and absent from polished count."""
+    raw_w, pol_w = _words(raw), _words(polished)
+    if not raw_w or not pol_w:
+        return False
+    left = collections.Counter(pol_w)
+    deleted = []
+    for w in raw_w:
+        if left[w] > 0:
+            left[w] -= 1
+        elif w not in _POLISH_FILLERS:
+            deleted.append(w)
+    if not deleted:
+        return True
+    if all(w in _CORRECTION_MARKERS or w in _CORRECTION_GLUE for w in deleted):
+        return False
+    return len(deleted) <= len(raw_w) / 2
+
+
 def polish_skip_reason(text: str, max_words: int) -> str | None:
     """Why the LLM polish can be skipped for `text`, or None to run it.
 
@@ -666,6 +724,9 @@ def polish_skip_reason(text: str, max_words: int) -> str | None:
     if not words or len(words) > max_words:
         return None
     if any(w in _POLISH_FILLERS for w in words):
+        return None
+    # "у п'ятницю ні в суботу" is short but may be a self-correction
+    if has_correction_marker(s):
         return None
     if words[0] in _POLISH_QUESTION_OPENERS and s[-1] != "?":
         return None
