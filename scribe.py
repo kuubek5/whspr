@@ -238,38 +238,3 @@ def run_scribe(instruction: str, lang: str, dur: float,
     flow.state["pill_text"] = result
     flow.state["pill_done_at"] = time.time()
     return "готово", True
-
-
-def _overlay_flash(msg: str, ok: bool) -> None:
-    if flow.overlay is not None and flow.config.get("overlay", True):
-        try:
-            flow.overlay.flash(msg, ok)
-        except Exception as e:
-            flow.log(f"overlay flash failed ({e.__class__.__name__}: {e})")
-
-
-def transcribe_and_paste(pre: list, cur: list, target_hwnd: int,
-                         command: bool = False, trace=None,
-                         stop_info=None) -> None:
-    """Transcribe an ALREADY DETACHED take. The caller owns the detaching: it
-    must call take_audio() on the thread that stops the recording, not here.
-    Doing it here left a window where the user could press the hotkey again
-    before this worker was ever scheduled — start_rec() would then clear the
-    buffers (losing take 1) and this worker would take_audio() the half-recorded
-    take 2. By the time we get here, `pre`/`cur` belong to us alone.
-
-    The model lock is still taken here, and only here: the buffers are already
-    free (so the next recording is never blocked), and this take is still
-    transcribed in full once the GPU is free. WhisperModel is not thread-safe
-    for concurrent transcribe() calls on one instance — without this lock,
-    overlapping takes stalled each other for over a minute."""
-    if not cur:
-        # Nothing was captured: a tap shorter than one audio block (~32 ms), or
-        # the mic died between start_rec and release. The status is still
-        # "recording" from start_rec, and _transcribe_impl — the only other
-        # place that resets it — is never reached, so the tray icon and the
-        # overlay pill would stay red until the NEXT dictation. Clear it here.
-        flow.set_status("idle")
-        return
-    with flow._transcribe_lock:
-        flow._transcribe_impl(pre, cur, target_hwnd, command, trace, stop_info)
