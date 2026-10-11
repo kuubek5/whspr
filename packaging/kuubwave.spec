@@ -25,7 +25,10 @@ hiddenimports = ["comtypes", "pystray._win32", "cuda_setup", "webview_app",
                  # term_suggest is imported lazily by webview_app for the same
                  # reason ("Знайти проблемні слова").
                  "text_fixes", "mic_level", "app_styles", "term_suggest",
-                 "latency", "style_profile"]
+                 "latency", "style_profile",
+                 # flow.py split (step 1): these four are imported by flow.py at
+                 # the position of their old sections, so list them explicitly.
+                 "history_store", "autostart", "updater", "cloud_stt"]
 
 # pull in data files / dylibs / submodules for the tricky native packages.
 # onnx_asr + onnxruntime are for the optional Parakeet engine: flow.py imports
