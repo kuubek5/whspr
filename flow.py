@@ -493,6 +493,15 @@ DEFAULTS = {
     # provider + model when stt_backend == "cloud"
     "stt_provider": "groq",              # groq | openai | elevenlabs
     "stt_model": "whisper-large-v3",
+    # Live preview: while a dictation records, re-decode what has been said so
+    # far every ~0.7 s and show its tail in the pill, so the words appear as
+    # the user speaks. Display only — the pasted text still comes from the full
+    # decode after the take ends. Local engines only: in cloud mode every
+    # preview would be a separate billed request.
+    "live_preview": True,
+    # Hands-free: recognise the take during the pause before auto-stop, so the
+    # text is ready the moment the take ends (see _speculate). Local only.
+    "speculative_decode": True,
     # per-provider keys. Groq reuses groq_api_key (shared with LLM polish).
     "openai_api_key": "",
     "elevenlabs_api_key": "",
@@ -3746,7 +3755,8 @@ def _overlay_flash(msg: str, ok: bool) -> None:
 
 
 def transcribe_and_paste(pre: list, cur: list, target_hwnd: int,
-                         command: bool = False, trace=None) -> None:
+                         command: bool = False, trace=None,
+                         stop_info=None) -> None:
     """Transcribe an ALREADY DETACHED take. The caller owns the detaching: it
     must call take_audio() on the thread that stops the recording, not here.
     Doing it here left a window where the user could press the hotkey again
@@ -3768,7 +3778,110 @@ def transcribe_and_paste(pre: list, cur: list, target_hwnd: int,
         set_status("idle")
         return
     with _transcribe_lock:
-        _transcribe_impl(pre, cur, target_hwnd, command, trace)
+        _transcribe_impl(pre, cur, target_hwnd, command, trace, stop_info)
+
+
+# ---------------- Live preview ----------------
+# While a dictation records, the words so far are re-decoded on a timer and the
+# tail is shown in the pill. Display only: nothing here pastes, touches the
+# history or feeds the final decode, which still runs on the whole take after
+# release exactly as before.
+LIVE_TICK_S = 0.7      # how often the preview wakes up
+LIVE_MIN_NEW_S = 0.5   # ...and re-decodes only once this much new audio arrived
+LIVE_WINDOW_S = 20.0   # newest audio decoded per pass (Whisper's window is 30 s)
+
+
+def live_preview_enabled() -> bool:
+    return bool(config.get("live_preview", True) and overlay is not None
+                and config.get("overlay", True)
+                and config.get("stt_backend", "local") != "cloud")
+
+
+def _live_decode(audio: np.ndarray) -> str:
+    """One cheap preview pass: greedy, no temperature fallback, no timestamps,
+    no hotwords. Same model and language as the final decode, so the preview
+    and the pasted text rarely disagree by more than a word."""
+    lang = LANGUAGES[state["lang"]]
+    auto = config.get("auto_lang", False)
+    if local_engine_for(lang, auto) == "parakeet":
+        try:
+            return parakeet_transcribe(audio)
+        except Exception:
+            pass  # same fallback as the final decode: Whisper is always there
+    if auto:
+        model, tr_lang, prompt = load_model(MODEL_NAME), None, None
+    else:
+        model, tr_lang = model_for(lang), lang
+        prompt = UK_INITIAL_PROMPT if lang == "uk" else None
+    segments, _ = model.transcribe(
+        audio, language=tr_lang, beam_size=1, temperature=0.0,
+        initial_prompt=prompt, condition_on_previous_text=False,
+        without_timestamps=True, no_repeat_ngram_size=3, repetition_penalty=1.1)
+    text, lp, ns = _segment_stats(list(segments))
+    # "дякую за перегляд" over a pause must not flicker into the pill either
+    return "" if _hallucination_reason(text, lp, ns) else text
+
+
+def live_preview_loop(take_id: int) -> None:
+    """Runs for one take; exits as soon as that take stops recording.
+
+    Shares _transcribe_lock with the real decode but only ever TRIES it: if the
+    model is busy (the previous take still transcribing) this tick is skipped.
+    The cost the other way is bounded by one preview pass — a release that lands
+    mid-pass waits for it, ~0.2 s greedy on the GPU."""
+    def same_take():
+        return state["recording"] and state.get("take_id") == take_id
+
+    last_n = 0
+    passes, spent = 0, 0.0
+    try:
+        while same_take():
+            time.sleep(LIVE_TICK_S)
+            if not same_take():
+                break
+            with _buf_lock:
+                cur = chunks[:]
+            n = sum(len(c) for c in cur)
+            if (n < MIN_DURATION_S * SAMPLE_RATE
+                    or n - last_n < LIVE_MIN_NEW_S * SAMPLE_RATE):
+                continue
+            audio = np.concatenate(cur).flatten().astype(np.float32)
+            new = audio[last_n:]
+            last_n = n
+            # Nothing said since the last pass (a pause, or the hands-free
+            # trailing silence before auto-stop): the text cannot have changed,
+            # so skip it. This also keeps the model free at the moment the take
+            # ends, so the final decode does not queue behind a preview pass.
+            # "Quiet" is relative to the take itself: a fixed floor alone would
+            # count room noise on a boosted quiet mic as speech.
+            audio = audio[-int(LIVE_WINDOW_S * SAMPLE_RATE):]
+            rms = float(np.sqrt(np.mean(audio ** 2)))
+            new_rms = float(np.sqrt(np.mean(new ** 2)))
+            if new_rms < max(config["rms_threshold"], 0.35 * rms):
+                continue
+            # same boost as the final decode, or a quiet mic previews nothing
+            target_rms = config.get("target_rms", 0.06)
+            if rms < target_rms:
+                gain = min(target_rms / rms, config.get("max_gain", 12.0))
+                audio = np.clip(audio * gain, -1.0, 1.0)
+            if not _transcribe_lock.acquire(blocking=False):
+                continue
+            try:
+                if not same_take():
+                    break
+                t0 = time.time()
+                text = _live_decode(audio).strip()
+                passes += 1
+                spent += time.time() - t0
+            finally:
+                _transcribe_lock.release()
+            if text and same_take():
+                overlay.live(text)
+    except Exception as e:
+        # a broken preview must never cost the dictation itself
+        log(f"live preview stopped ({e.__class__.__name__}: {e})")
+    if passes:
+        log(f"live preview: {passes} passes, avg {spent / passes:.2f}s")
 
 
 # Remembers the dictionary string we last warned about, so the "very short
@@ -3990,15 +4103,257 @@ def _schedule_llm_polish(raw: str, lang: str, target_hwnd: int,
     threading.Thread(target=work, daemon=True).start()
 
 
+# ---------------- Speculative decode (hands-free) ----------------
+# Hands-free ends a take only after silence_stop_s of silence, and the GPU sits
+# idle through that whole wait. So once the pause is SPEC_AFTER_S old, the take
+# so far is recognised in the background; if the auto-stop then fires on that
+# same pause (no speech since — the VAD's silent_since is unchanged), the final
+# decode reuses the result instead of starting from scratch. Same _recognize,
+# same model and settings, so the text is the one the final decode would give;
+# the only audio it lacks is the trailing silence. Any new speech starts a new
+# pause with a new silent_since, and a stale result simply never matches.
+SPEC_AFTER_S = 0.35
+_spec_lock = threading.Lock()
+_spec_result: dict = {}   # (take_id, silent_since) -> _recognize() tuple
+_spec_taken = None        # key the final decode already settled, hit or miss
+
+
+def speculative_enabled() -> bool:
+    # cloud: each speculation would be one more billed request
+    return bool(config.get("speculative_decode", True)
+                and config.get("stt_backend", "local") != "cloud")
+
+
+def _speculate(key: tuple, pre: list, cur: list) -> None:
+    """Background: recognise a snapshot of the take for `key`. Never raises."""
+    try:
+        audio = np.concatenate(pre + cur).flatten().astype(np.float32)
+        rms = float(np.sqrt(np.mean(audio ** 2)))
+        if rms < config["rms_threshold"]:
+            return
+        # the same boost _transcribe_impl applies to the whole take
+        target_rms = config.get("target_rms", 0.06)
+        if rms < target_rms:
+            gain = min(target_rms / rms, config.get("max_gain", 12.0))
+            audio = np.clip(audio * gain, -1.0, 1.0)
+        with _transcribe_lock:
+            # the final decode got the model first and already went its own way
+            if _spec_taken == key or state.get("take_id") != key[0]:
+                return
+            t0 = time.time()
+            res = _recognize(audio, len(audio) / SAMPLE_RATE)
+            # stored INSIDE the lock: a final decode waiting on it must find it
+            with _spec_lock:
+                _spec_result.clear()
+                _spec_result[key] = res
+        log(f"speculative decode ready in {time.time() - t0:.2f}s")
+    except Exception as e:
+        log(f"speculative decode failed ({e.__class__.__name__}: {e})")
+
+
+def _speculative_result(key):
+    """The speculative _recognize() tuple for this stop, or None. Called by the
+    final decode under _transcribe_lock; settles `key` either way."""
+    global _spec_taken
+    if key is None:
+        return None
+    with _spec_lock:
+        _spec_taken = key
+        res = _spec_result.pop(key, None)
+        _spec_result.clear()
+    if res is not None:
+        log("speculative decode reused")
+    return res
+
+
+class CloudSTTError(Exception):
+    """The cloud recognizer failed; the message is shown in the pill."""
+
+
+def _recognize(audio: np.ndarray, dur: float) -> tuple:
+    """Speech -> (text, avg_logprob, no_speech_prob, lang) for one prepared
+    (boosted) clip: cloud or local engine, Parakeet with its Whisper second
+    opinion, and the Russian-drift retry. text is None/"" when nothing was
+    recognised. Raises CloudSTTError when the cloud backend fails.
+
+    Must run under _transcribe_lock (the model is not thread-safe). Split out
+    of _transcribe_impl so a hands-free take can be recognised speculatively
+    during the trailing pause (see _speculate) with the very same code."""
+    text = None
+    avg_logprob = no_speech_prob = 0.0
+    lang = LANGUAGES[state["lang"]]
+    if config.get("stt_backend", "local") == "cloud":
+        t0 = time.time()
+        hint = None if config.get("auto_lang", False) else lang
+        try:
+            text = _cloud_transcribe(audio, hint)
+        except Exception as e:
+            log(f"cloud STT failed ({e.__class__.__name__}: {e})")
+            raise CloudSTTError(str(e)) from e
+        log(f"{dur:.1f}s audio -> {time.time()-t0:.2f}s cloud "
+            f"[{config.get('stt_provider')}/{config.get('stt_model')}]: {text!r}")
+    auto = config.get("auto_lang", False)
+    # Parakeet's transcript when it decoded this take but Whisper is asked
+    # for a second opinion (Russian drift, below); None otherwise
+    pk_text = None
+    if text is None and local_engine_for(lang, auto) == "parakeet":
+        t0 = time.time()
+        try:
+            text = parakeet_transcribe(audio)
+        except Exception as e:
+            # missing package/model or a runtime error: this take goes to
+            # Whisper, which is always there
+            log(f"parakeet failed ({e.__class__.__name__}: {e}) — using Whisper")
+            text = None
+        if text is not None:
+            # Parakeet exposes no avg_logprob / no_speech_prob, so the
+            # confidence numbers stay at the neutral 0.0 set above. In
+            # _hallucination_reason that means rule 2 (short AND unsure)
+            # cannot fire for a Parakeet take, while rule 1 (known subtitle
+            # artifacts) still applies. That is the right trade: a transducer
+            # emits nothing over silence rather than Whisper-style filler, so
+            # the short-unsure rule has little to catch here, and guessing a
+            # confidence would only risk dropping real "так"/"дякую" takes.
+            # Dictionary hotwords and initial_prompt are Whisper-only;
+            # text_fixes.restore_terms below still runs on this output.
+            log(f"{dur:.1f}s audio -> {time.time() - t0:.2f}s parakeet "
+                f"[{lang}]: {text!r}")
+            # Russian drift: Parakeet has no language token or prompt to
+            # steer, so the Whisper ru_retry trick (re-decode with a heavier
+            # Ukrainian prompt) has no Parakeet equivalent. Instead hand the
+            # take to Whisper — which runs its own ru-retry — and keep
+            # whichever transcript is less Russian (ties keep Parakeet's).
+            if (text and lang == "uk" and not auto
+                    and config.get("ru_retry", True)
+                    and text_fixes.looks_russian(text)):
+                log("parakeet output looks Russian — asking Whisper")
+                pk_text, text = text, None
+    if text is None:
+        hotwords = _build_hotwords(config.get("dictionary", ""))
+        t0 = time.time()
+        # auto language: let Whisper detect instead of the manual F10 choice.
+        # Detection needs the multilingual stock model and no Ukrainian prompt
+        # bias, so auto mode trades the uk fine-tune for hands-off language.
+        if auto:
+            model = load_model(MODEL_NAME)
+            tr_lang, initial_prompt = None, None
+        else:
+            lang = LANGUAGES[state["lang"]]
+            model = model_for(lang)
+            tr_lang = lang
+            initial_prompt = UK_INITIAL_PROMPT if lang == "uk" else None
+        # hallucination_silence_threshold drops text invented over silent gaps,
+        # but it can only find those gaps with word_timestamps, and that forced
+        # alignment pass costs ~5-10% extra latency per segment. Push-to-talk
+        # clips rarely contain long silences, so the guard is opt-in.
+        guard = {}
+        if config.get("hallucination_guard", False):
+            guard = {"word_timestamps": True, "hallucination_silence_threshold": 2.0}
+        # vad_filter is a config key, not a constant. The old comment here
+        # claimed Silero was off because onnxruntime "hangs for minutes on this
+        # machine"; that is no longer true — measured on this machine,
+        # onnxruntime imports in 0.3 s, faster_whisper.vad loads in 0.24 s and
+        # get_speech_timestamps runs in 138 ms on an 8 s clip, i.e. it is cheap.
+        # The real reason it stays off by default is accuracy, not speed: see
+        # the "vad" entry in DEFAULTS. No vad_parameters are passed — the
+        # faster-whisper defaults are sensible and there is no measurement here
+        # justifying anything else.
+        def _decode(prompt, temperature=None):
+            """One decode pass. Returns (info, text, avg_logprob, no_speech).
+
+            Factored out only so the Russian-drift retry below can run the exact
+            same configuration with one knob changed — every parameter here is
+            the single source of truth for both passes."""
+            kw = dict(
+                language=tr_lang, vad_filter=config.get("vad", False),
+                beam_size=config["beam_size"], hotwords=hotwords,
+                initial_prompt=prompt,
+                condition_on_previous_text=False,
+                # anti-hallucination guards that are OFF by default in
+                # faster-whisper and cost nothing, so they stay on
+                # unconditionally. The temperature fallback and
+                # compression/no-speech thresholds are already on:
+                #   no_repeat_ngram_size — blocks "4 4 4 4 4" / "піп піп" loops
+                #   repetition_penalty   — discourages the model repeating itself
+                no_repeat_ngram_size=3,
+                repetition_penalty=1.1,
+                **guard,
+            )
+            if temperature is not None:
+                kw["temperature"] = temperature
+            segments, inf = model.transcribe(audio, **kw)
+            # materialise the generator once: the text and the two confidence
+            # numbers the filter needs all come from the same single pass
+            segs = list(segments)
+            return (inf,) + _segment_stats(segs)
+
+        info, text, avg_logprob, no_speech_prob = _decode(initial_prompt)
+        if auto:
+            # keep the detected language if it's one we support, else stay put
+            lang = info.language if info.language in LANGUAGES else LANGUAGES[state["lang"]]
+            state["lang"] = LANGUAGES.index(lang)
+        ru = "".join(sorted(set(text) & RU_ONLY_CHARS))
+        log(f"{dur:.1f}s audio -> {time.time() - t0:.2f}s transcribe [{lang}]"
+            f"{' RU-chars:' + ru if ru else ''}: {text!r} "
+            f"(avg_logprob={avg_logprob:.2f}, no_speech={no_speech_prob:.2f})")
+        # Russian drift. 2.0% of this user's 3822 takes came back with Russian in
+        # them ("Тесты", "Релиз", "пошты") — the model phonetically slipping
+        # language, not the user switching. RU_ONLY_CHARS is an exact test with
+        # no false positives: those four letters do not exist in Ukrainian, so
+        # seeing one in a take the user asked to be Ukrainian is proof of drift.
+        # Re-decode with a heavier Ukrainian prompt and the temperature fallback
+        # pinned off (the fallback is often what produced the drift), then keep
+        # whichever pass looks less Russian. Costs one extra ~0.4 s pass on the
+        # 2% of takes that trip it, and never runs in auto-language mode, where
+        # Russian may be exactly what the user is speaking.
+        # text_fixes.looks_russian subsumes the RU_ONLY_CHARS test (a
+        # Russian-only letter alone already scores above the threshold) and adds
+        # Russian function words that contain no such letter — "что", "нужно",
+        # "потому" would otherwise sail through. Measured: 31 of the user's 3834
+        # takes trip it, all genuinely Russian, none false.
+        if (text and lang == "uk" and not auto
+                and config.get("ru_retry", True)
+                and text_fixes.looks_russian(text)):
+            try:
+                t1 = time.time()
+                _, r_text, r_lp, r_ns = _decode(UK_RETRY_PROMPT, temperature=0.0)
+                r_ru = "".join(sorted(set(r_text) & RU_ONLY_CHARS))
+                log(f"ru-retry {time.time() - t1:.2f}s: {r_text!r} "
+                    f"(RU-chars:{r_ru or '-'}, avg_logprob={r_lp:.2f})")
+                # Accept only a strict improvement, scored the same way the
+                # trigger is. Deliberately NOT the distinct-letter sets `ru` /
+                # `r_ru` that the log line carries: "Тесты и релизы" and "Тесты
+                # і релізи" both reduce to the single letter "ы", so comparing
+                # those sets would reject a retry that fixed half the Russian in
+                # the take. An empty or equally-Russian retry must never replace
+                # a transcript the user can still fix by hand; ties go to the
+                # first pass.
+                if r_text and text_fixes.ru_score(r_text) < text_fixes.ru_score(text):
+                    text, avg_logprob, no_speech_prob, ru = r_text, r_lp, r_ns, r_ru
+                    log("ru-retry accepted")
+            except Exception as e:
+                log(f"ru-retry failed ({e.__class__.__name__}: {e}) — keeping first pass")
+        if pk_text is not None:
+            if text and text_fixes.ru_score(text) < text_fixes.ru_score(pk_text):
+                log("whisper second opinion accepted over parakeet")
+            else:
+                text, avg_logprob, no_speech_prob = pk_text, 0.0, 0.0
+                log("keeping parakeet output")
+    return text, avg_logprob, no_speech_prob, lang
+
+
 def _transcribe_impl(pre: list, cur: list, target_hwnd: int,
-                     command: bool = False, trace=None) -> None:
+                     command: bool = False, trace=None, stop_info=None) -> None:
     """`command` marks a command-mode take: the transcript is an instruction for
     run_selection_command and is never pasted. It goes through the same
     silence/hallucination filters first, so a misheard or empty instruction
     aborts before the user's selection or clipboard is ever touched.
 
     `trace` is the take's latency.Trace from stop_rec (None from tests and any
-    other caller: a fresh one is made, it just has no wait/queue stages)."""
+    other caller: a fresh one is made, it just has no wait/queue stages).
+
+    `stop_info` is the (take_id, silent_since) key of a hands-free auto-stop,
+    used to pick up a speculative decode of this take (see _speculate)."""
     if trace is None:
         trace = latency.Trace()
     set_status("processing")
@@ -4055,167 +4410,15 @@ def _transcribe_impl(pre: list, cur: list, target_hwnd: int,
             state["mic_too_quiet"] = False
         # --- recognition backend: cloud (BYOK) or local (default) ---
         trace.mark("stt_start")
-        text = None
-        avg_logprob = no_speech_prob = 0.0
-        lang = LANGUAGES[state["lang"]]
-        if config.get("stt_backend", "local") == "cloud":
-            t0 = time.time()
-            hint = None if config.get("auto_lang", False) else lang
+        spec = _speculative_result(stop_info)
+        if spec is not None:
+            text, avg_logprob, no_speech_prob, lang = spec
+        else:
             try:
-                text = _cloud_transcribe(audio, hint)
-            except Exception as e:
-                log(f"cloud STT failed ({e.__class__.__name__}: {e})")
+                text, avg_logprob, no_speech_prob, lang = _recognize(audio, dur)
+            except CloudSTTError as e:
                 done_msg, ok = ("хмара: " + str(e))[:80], False
                 return
-            log(f"{dur:.1f}s audio -> {time.time()-t0:.2f}s cloud "
-                f"[{config.get('stt_provider')}/{config.get('stt_model')}]: {text!r}")
-        auto = config.get("auto_lang", False)
-        # Parakeet's transcript when it decoded this take but Whisper is asked
-        # for a second opinion (Russian drift, below); None otherwise
-        pk_text = None
-        if text is None and local_engine_for(lang, auto) == "parakeet":
-            t0 = time.time()
-            try:
-                text = parakeet_transcribe(audio)
-            except Exception as e:
-                # missing package/model or a runtime error: this take goes to
-                # Whisper, which is always there
-                log(f"parakeet failed ({e.__class__.__name__}: {e}) — using Whisper")
-                text = None
-            if text is not None:
-                # Parakeet exposes no avg_logprob / no_speech_prob, so the
-                # confidence numbers stay at the neutral 0.0 set above. In
-                # _hallucination_reason that means rule 2 (short AND unsure)
-                # cannot fire for a Parakeet take, while rule 1 (known subtitle
-                # artifacts) still applies. That is the right trade: a transducer
-                # emits nothing over silence rather than Whisper-style filler, so
-                # the short-unsure rule has little to catch here, and guessing a
-                # confidence would only risk dropping real "так"/"дякую" takes.
-                # Dictionary hotwords and initial_prompt are Whisper-only;
-                # text_fixes.restore_terms below still runs on this output.
-                log(f"{dur:.1f}s audio -> {time.time() - t0:.2f}s parakeet "
-                    f"[{lang}]: {text!r}")
-                # Russian drift: Parakeet has no language token or prompt to
-                # steer, so the Whisper ru_retry trick (re-decode with a heavier
-                # Ukrainian prompt) has no Parakeet equivalent. Instead hand the
-                # take to Whisper — which runs its own ru-retry — and keep
-                # whichever transcript is less Russian (ties keep Parakeet's).
-                if (text and lang == "uk" and not auto
-                        and config.get("ru_retry", True)
-                        and text_fixes.looks_russian(text)):
-                    log("parakeet output looks Russian — asking Whisper")
-                    pk_text, text = text, None
-        if text is None:
-            hotwords = _build_hotwords(config.get("dictionary", ""))
-            t0 = time.time()
-            # auto language: let Whisper detect instead of the manual F10 choice.
-            # Detection needs the multilingual stock model and no Ukrainian prompt
-            # bias, so auto mode trades the uk fine-tune for hands-off language.
-            if auto:
-                model = load_model(MODEL_NAME)
-                tr_lang, initial_prompt = None, None
-            else:
-                lang = LANGUAGES[state["lang"]]
-                model = model_for(lang)
-                tr_lang = lang
-                initial_prompt = UK_INITIAL_PROMPT if lang == "uk" else None
-            # hallucination_silence_threshold drops text invented over silent gaps,
-            # but it can only find those gaps with word_timestamps, and that forced
-            # alignment pass costs ~5-10% extra latency per segment. Push-to-talk
-            # clips rarely contain long silences, so the guard is opt-in.
-            guard = {}
-            if config.get("hallucination_guard", False):
-                guard = {"word_timestamps": True, "hallucination_silence_threshold": 2.0}
-            # vad_filter is a config key, not a constant. The old comment here
-            # claimed Silero was off because onnxruntime "hangs for minutes on this
-            # machine"; that is no longer true — measured on this machine,
-            # onnxruntime imports in 0.3 s, faster_whisper.vad loads in 0.24 s and
-            # get_speech_timestamps runs in 138 ms on an 8 s clip, i.e. it is cheap.
-            # The real reason it stays off by default is accuracy, not speed: see
-            # the "vad" entry in DEFAULTS. No vad_parameters are passed — the
-            # faster-whisper defaults are sensible and there is no measurement here
-            # justifying anything else.
-            def _decode(prompt, temperature=None):
-                """One decode pass. Returns (info, text, avg_logprob, no_speech).
-
-                Factored out only so the Russian-drift retry below can run the exact
-                same configuration with one knob changed — every parameter here is
-                the single source of truth for both passes."""
-                kw = dict(
-                    language=tr_lang, vad_filter=config.get("vad", False),
-                    beam_size=config["beam_size"], hotwords=hotwords,
-                    initial_prompt=prompt,
-                    condition_on_previous_text=False,
-                    # anti-hallucination guards that are OFF by default in
-                    # faster-whisper and cost nothing, so they stay on
-                    # unconditionally. The temperature fallback and
-                    # compression/no-speech thresholds are already on:
-                    #   no_repeat_ngram_size — blocks "4 4 4 4 4" / "піп піп" loops
-                    #   repetition_penalty   — discourages the model repeating itself
-                    no_repeat_ngram_size=3,
-                    repetition_penalty=1.1,
-                    **guard,
-                )
-                if temperature is not None:
-                    kw["temperature"] = temperature
-                segments, inf = model.transcribe(audio, **kw)
-                # materialise the generator once: the text and the two confidence
-                # numbers the filter needs all come from the same single pass
-                segs = list(segments)
-                return (inf,) + _segment_stats(segs)
-
-            info, text, avg_logprob, no_speech_prob = _decode(initial_prompt)
-            if auto:
-                # keep the detected language if it's one we support, else stay put
-                lang = info.language if info.language in LANGUAGES else LANGUAGES[state["lang"]]
-                state["lang"] = LANGUAGES.index(lang)
-            ru = "".join(sorted(set(text) & RU_ONLY_CHARS))
-            log(f"{dur:.1f}s audio -> {time.time() - t0:.2f}s transcribe [{lang}]"
-                f"{' RU-chars:' + ru if ru else ''}: {text!r} "
-                f"(avg_logprob={avg_logprob:.2f}, no_speech={no_speech_prob:.2f})")
-            # Russian drift. 2.0% of this user's 3822 takes came back with Russian in
-            # them ("Тесты", "Релиз", "пошты") — the model phonetically slipping
-            # language, not the user switching. RU_ONLY_CHARS is an exact test with
-            # no false positives: those four letters do not exist in Ukrainian, so
-            # seeing one in a take the user asked to be Ukrainian is proof of drift.
-            # Re-decode with a heavier Ukrainian prompt and the temperature fallback
-            # pinned off (the fallback is often what produced the drift), then keep
-            # whichever pass looks less Russian. Costs one extra ~0.4 s pass on the
-            # 2% of takes that trip it, and never runs in auto-language mode, where
-            # Russian may be exactly what the user is speaking.
-            # text_fixes.looks_russian subsumes the RU_ONLY_CHARS test (a
-            # Russian-only letter alone already scores above the threshold) and adds
-            # Russian function words that contain no such letter — "что", "нужно",
-            # "потому" would otherwise sail through. Measured: 31 of the user's 3834
-            # takes trip it, all genuinely Russian, none false.
-            if (text and lang == "uk" and not auto
-                    and config.get("ru_retry", True)
-                    and text_fixes.looks_russian(text)):
-                try:
-                    t1 = time.time()
-                    _, r_text, r_lp, r_ns = _decode(UK_RETRY_PROMPT, temperature=0.0)
-                    r_ru = "".join(sorted(set(r_text) & RU_ONLY_CHARS))
-                    log(f"ru-retry {time.time() - t1:.2f}s: {r_text!r} "
-                        f"(RU-chars:{r_ru or '-'}, avg_logprob={r_lp:.2f})")
-                    # Accept only a strict improvement, scored the same way the
-                    # trigger is. Deliberately NOT the distinct-letter sets `ru` /
-                    # `r_ru` that the log line carries: "Тесты и релизы" and "Тесты
-                    # і релізи" both reduce to the single letter "ы", so comparing
-                    # those sets would reject a retry that fixed half the Russian in
-                    # the take. An empty or equally-Russian retry must never replace
-                    # a transcript the user can still fix by hand; ties go to the
-                    # first pass.
-                    if r_text and text_fixes.ru_score(r_text) < text_fixes.ru_score(text):
-                        text, avg_logprob, no_speech_prob, ru = r_text, r_lp, r_ns, r_ru
-                        log("ru-retry accepted")
-                except Exception as e:
-                    log(f"ru-retry failed ({e.__class__.__name__}: {e}) — keeping first pass")
-            if pk_text is not None:
-                if text and text_fixes.ru_score(text) < text_fixes.ru_score(pk_text):
-                    log("whisper second opinion accepted over parakeet")
-                else:
-                    text, avg_logprob, no_speech_prob = pk_text, 0.0, 0.0
-                    log("keeping parakeet output")
         trace.mark("stt_end")
         if not text:
             # also the normal outcome when vad_filter is on and Silero judged the
@@ -4448,10 +4651,16 @@ def start_listener() -> "_Listeners":
         # pastes THERE, even if focus wanders during the take (see
         # dictation_paste_target). Command takes keep their own command_hwnd.
         state["start_hwnd"] = user32.GetForegroundWindow()
+        state["take_id"] = state.get("take_id", 0) + 1
         state["recording"] = True
         duck_others(True)
         set_status("recording")
         log("recording...")
+        # words-as-you-speak in the pill; dictations only (a command take's
+        # instruction is not text the user wants to watch being typed)
+        if state.get("take_kind") == "dictate" and live_preview_enabled():
+            threading.Thread(target=live_preview_loop, args=(state["take_id"],),
+                             daemon=True).start()
         # TLS handshake to the LLM while the user talks, not after (see
         # _http_pool); background thread, no request sent, no-op without Groq
         _llm_prewarm()
@@ -4482,6 +4691,10 @@ def start_listener() -> "_Listeners":
             except Exception:
                 ago = None  # timing is diagnostics; never cost the take
         trace.stopped(ago)
+        # the pause the auto-stop fired on, so the decode can reuse a
+        # speculative pass made during that same pause (see _speculate)
+        since = getattr(dec, "silent_since", None)
+        stop_info = (state.get("take_id"), since) if since is not None else None
         command = state.get("take_kind") == "command"
         state["take_kind"] = "dictate"
         # a command edits the window whose selection was there when the key
@@ -4493,7 +4706,8 @@ def start_listener() -> "_Listeners":
         else:
             hwnd = dictation_paste_target(start_hwnd)
         threading.Thread(target=transcribe_and_paste,
-                         args=(pre, cur, hwnd, command, trace), daemon=True).start()
+                         args=(pre, cur, hwnd, command, trace, stop_info),
+                         daemon=True).start()
         if config.get("mic_on_demand"):
             close_stream()
 
@@ -4515,6 +4729,7 @@ def start_listener() -> "_Listeners":
         st_note = (f" smart-turn ask@{st_gate.gap}s thr={st_gate.threshold}"
                    if st_gate else "")
         log(f"hands-free: auto-stop engine={dec.name} gap={gap}s{st_note}")
+        spec_key = None  # the pause already being decoded speculatively
         while state["recording"]:
             stop = smart = False
             if vad is not None:
@@ -4535,6 +4750,19 @@ def start_listener() -> "_Listeners":
                 log(f"hands-free: {why} -> auto stop ({dec.describe()})")
                 stop_rec(dec)
                 return
+            # a pause long enough to be the end: recognise it now, while the
+            # auto-stop is still waiting (VAD only — it alone knows where the
+            # pause began, which is what makes the result safe to reuse)
+            since = getattr(dec, "silent_since", None) if vad is not None else None
+            if (since is not None and dec.silence_s() >= SPEC_AFTER_S
+                    and (state.get("take_id"), since) != spec_key
+                    and speculative_enabled()):
+                spec_key = (state.get("take_id"), since)
+                with _buf_lock:
+                    snap_pre, snap_cur = list(pre_roll), chunks[:]
+                threading.Thread(target=_speculate,
+                                 args=(spec_key, snap_pre, snap_cur),
+                                 daemon=True).start()
             if time.time() - t_start >= hard_max:
                 log(f"hands-free: {hard_max}s cap -> auto stop ({dec.describe()})")
                 stop_rec()
