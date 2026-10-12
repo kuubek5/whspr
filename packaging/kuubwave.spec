@@ -36,7 +36,9 @@ hiddenimports = ["comtypes", "pystray._win32", "cuda_setup", "webview_app",
                  # flow.py split (step 4): same reason as step 1.
                  "single_instance", "whisper_model", "audio_input", "paste",
                  # flow.py split (step 5): same reason as step 1.
-                 "live_preview", "transcription"]
+                 "live_preview", "transcription",
+                 # flow.py split (step 6): same reason as step 1.
+                 "hotkeys"]
 
 # pull in data files / dylibs / submodules for the tricky native packages.
 # onnx_asr + onnxruntime are for the optional Parakeet engine: flow.py imports

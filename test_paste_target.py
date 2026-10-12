@@ -86,7 +86,8 @@ class DictationWiring(unittest.TestCase):
         # source level: dictation takes go through dictation_paste_target with
         # the start-time hwnd, command takes keep command_hwnd.
         import inspect
-        src = inspect.getsource(flow.start_listener)
+        # the code lives in hotkeys.py and reaches shared state as flow.<name>
+        src = inspect.getsource(flow.start_listener).replace("flow.", "")
         self.assertIn('state["start_hwnd"] = user32.GetForegroundWindow()', src)
         self.assertIn('start_hwnd = state.pop("start_hwnd", None)', src)
         self.assertIn("hwnd = dictation_paste_target(start_hwnd)", src)
