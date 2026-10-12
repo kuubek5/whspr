@@ -123,6 +123,7 @@ def _wave_gain(n: int) -> tuple:
                  for i in range(n))
 
 FLASH_MAX_CHARS = 30  # result preview length (unchanged from the old pill)
+LIVE_W = 300          # live-preview text slot in the pill, logical px at 100%
 FRAME_MS = 76        # ~13 fps — plenty for a level meter, cheap for the CPU
 PROC_MS = 100        # the processing arc turns slower still
 SCALE_MIN, SCALE_MAX = 80, 140
@@ -290,6 +291,10 @@ class _TkOverlay:
             self._level = min(1.0, max(0.0, float(value)))
         except (TypeError, ValueError):
             pass
+
+    def live(self, text: str):
+        """Live preview text. The colour-key fallback has no room for it and
+        simply keeps showing the wave; only the layered renderer draws it."""
 
     # ---- one-time item construction (tk thread only) ----
     def _build(self):
@@ -1000,6 +1005,10 @@ class _LayeredOverlay:
         self.BAR_GAP = max(1.0, 3.0 * s)
         self.LANE_H = r(18)
         self.LANE_W = N_BARS * self.BAR_W + (N_BARS - 1) * self.BAR_GAP
+        # fixed slot for the live preview text: the pill widens ONCE when the
+        # first words arrive and then holds still, instead of re-centring on
+        # every update
+        self.LIVE_W = r(LIVE_W)
         # per-shape geometry (see the header + _TkOverlay for the same model).
         # self.H is the overlay's outer height; the orb is a circle so its
         # height IS its diameter, the dock is a taller stadium.
@@ -1037,6 +1046,7 @@ class _LayeredOverlay:
         self._arc = 0.0
         self._state = None
         self._text = ""
+        self._live = ""
         self._ok = True
         self.frames = 0
         self._shown = False
@@ -1088,6 +1098,11 @@ class _LayeredOverlay:
             self._level = min(1.0, max(0.0, float(value)))
         except (TypeError, ValueError):
             pass
+
+    def live(self, text: str):
+        """Words recognised so far in this take (flow.live_preview_loop). A
+        plain attribute swap, picked up by the next recording frame."""
+        self._live = " ".join(str(text or "").split())
 
     # ---- DIB / layered-window plumbing ----
     def _ensure_dib(self, w: int, h: int):
@@ -1172,6 +1187,22 @@ class _LayeredOverlay:
             text = text[:-1]
         return (text + "…") if text else "…"
 
+    def _fit_tail(self, text: str, maxw: float, font) -> str:
+        """Keep the END of the text (the words just spoken), cutting from the
+        left at a word boundary where one is close enough."""
+        if not text or self._measure(font, text) <= maxw:
+            return text
+        while text and self._measure(font, "…" + text) > maxw:
+            cut = text.find(" ", 1)
+            text = text[cut + 1:] if 0 < cut <= 12 else text[1:]
+        return "…" + text
+
+    def _live_label(self) -> str:
+        """The preview tail while recording / processing, else ""."""
+        if self._state not in ("rec", "proc") or not self._live:
+            return ""
+        return self._fit_tail(self._live, self.LIVE_W, self._label_font)
+
     def _win_w(self) -> int:
         """Outer width of the current shape (the orb is square, dock is fixed)."""
         if self.style == "orb":
@@ -1190,10 +1221,15 @@ class _LayeredOverlay:
         timer_txt = self._elapsed() if st == "rec" else self._frozen
         label = {"loading": "Завантаження моделі…", "proc": "Розпізнаю…",
                  "rec": "", "flash": self._text}.get(st, "")
+        live = self._live_label()
+        if live:
+            label = live
         parts = [float(self.GLYPH)]
         if show_bars:
             parts.append(self.LANE_W)
-        if label:
+        if live:
+            parts.append(float(self.LIVE_W))
+        elif label:
             parts.append(self._measure(self._label_font, label))
         if show_timer:
             parts.append(self._timer_w(timer_txt))
@@ -1267,8 +1303,15 @@ class _LayeredOverlay:
                   fill=_rgba(dot_fill))
         lx += self.DOCK_DOT + self.GAP
         lane_x = lx
-        # --- the lane: wave while recording, else a status / result label ---
-        if st == "rec":
+        # --- the lane: live words, else the wave while recording, else a
+        # status / result label ---
+        live = (self._fit_tail(self._live, self.DOCK_LANE_W, self._label_font)
+                if st in ("rec", "proc") and self._live else "")
+        if live:
+            d.text((X(lane_x), Y(cyL)), live, font=self._label_font,
+                   fill=_rgba(COLORS["text"] if st == "rec" else COLORS["muted"]),
+                   anchor="lm")
+        elif st == "rec":
             for i in range(self.WAVE_N):
                 hL = self.LANE_H * (0.17 + self._levels[i] * self.WAVE_GAIN[i] * 0.83)
                 bxL = lane_x + i * (self.BAR_W + self.BAR_GAP)
@@ -1464,13 +1507,17 @@ class _LayeredOverlay:
 
         # --- copy ---
         label, timer_txt, _sb, show_timer, _w = self._content()
+        live = bool(self._live_label())
         if label:
             colour = COLORS["muted"]
-            if st == "flash":
+            if live and st == "rec":
+                colour = COLORS["text"]
+            elif st == "flash":
                 colour = COLORS["text"] if self._ok else COLORS["muted"]
             d.text((X(lx), Y(cyL)), label, font=self._label_font,
                    fill=_rgba(colour), anchor="lm")
-            lx += self._measure(self._label_font, label) + self.GAP
+            lx += (self.LIVE_W if live
+                   else self._measure(self._label_font, label)) + self.GAP
 
         if show_timer:
             tcol = COLORS["text"] if st == "rec" else COLORS["muted"]
@@ -1506,6 +1553,7 @@ class _LayeredOverlay:
     def _apply(self, name: str):
         if name == "rec":
             self._frozen = "0:00"
+            self._live = ""
         elif name == "proc" and self._state == "rec":
             self._frozen = self._elapsed()
         self._state = name
@@ -1637,6 +1685,9 @@ class StatusOverlay:
 
     def level(self, value: float):
         return self._impl.level(value)
+
+    def live(self, text: str):
+        return self._impl.live(text)
 
     def destroy(self):
         return self._impl.destroy()

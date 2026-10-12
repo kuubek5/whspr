@@ -15,6 +15,12 @@
 #       python bench.py --record 8            (record your own clip first)
 #       python bench.py samples --runs 5 --beam 1 5 --compute float16
 #
+# Whisper vs Parakeet (the optional local_engine): same clips, both engines,
+# time + transcript side by side, and WER when clip.txt holds what was said:
+#       python bench.py --record 8 --record-out samples\01.wav --record-only
+#       (write what you said into samples\01.txt; repeat for 5-10 phrases)
+#       python bench.py samples --engines
+#
 # --------------------------------------------------------------------------
 # Why `import flow` is safe here (verified against flow.py as it stands — re-check
 # if flow.py's module scope grows):
@@ -350,6 +356,145 @@ def norm(text: str) -> str:
     return " ".join(text.split())
 
 
+# ------------------------- Whisper vs Parakeet -------------------------
+
+def _wer_norm(text: str) -> list[str]:
+    """Words for WER: lowercase, punctuation dropped, apostrophe variants unified.
+
+    Punctuation and case are scored out on purpose — the two engines punctuate
+    differently and LLM polish / capitalize_sentences rewrite both anyway, so
+    only the WORDS say whether an engine heard the user right."""
+    t = text.lower().replace("ʼ", "'").replace("’", "'").replace("`", "'")
+    t = re.sub(r"[^\w\s']", " ", t)
+    return [w.strip("'") for w in t.split() if w.strip("'")]
+
+
+def wer(ref: str, hyp: str) -> float:
+    """Word error rate (Levenshtein over words / reference length)."""
+    r, h = _wer_norm(ref), _wer_norm(hyp)
+    if not r:
+        return 0.0 if not h else 1.0
+    prev = list(range(len(h) + 1))
+    for i, rw in enumerate(r, 1):
+        cur = [i] + [0] * len(h)
+        for j, hw in enumerate(h, 1):
+            cur[j] = min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (rw != hw))
+        prev = cur
+    return prev[-1] / len(r)
+
+
+def _reference_for(path: str) -> str | None:
+    """Optional ground truth: clip.wav -> clip.txt next to it (UTF-8)."""
+    txt = os.path.splitext(path)[0] + ".txt"
+    try:
+        with open(txt, encoding="utf-8") as f:
+            return f.read().strip() or None
+    except OSError:
+        return None
+
+
+def compare_engines(paths: list[str], args) -> int:
+    """Run Whisper (exactly as the app decodes) and Parakeet on the same clips
+    and print time + transcript side by side, plus WER where a .txt reference
+    exists. Whisper uses the configured model / beam_size / compute_type, so the
+    numbers describe what the user runs today, not a tuned best case."""
+    device = args.device
+    if device == "auto":
+        try:
+            import ctranslate2
+            device = "cuda" if ctranslate2.get_cuda_device_count() > 0 else "cpu"
+        except Exception:
+            device = "cpu"
+    model_key = args.model or flow.config.get("model_uk", "stock")
+    if model_key not in flow.MODELS:
+        print(f"Невідомий ключ моделі {model_key!r}.")
+        return 1
+    repo = flow.model_name_for(args.lang) if not args.model else flow.MODELS[model_key]["repo"]
+    want = flow.config.get("compute_type") or ""
+    ct = (want or "int8_float16") if device == "cuda" else (
+        want if want in flow.CPU_COMPUTE_TYPES else "int8")
+    beam = flow.config.get("beam_size", 1)
+    hotwords = None if args.no_hotwords else flow._build_hotwords(flow.config.get("dictionary", ""))
+    prompt = flow.UK_INITIAL_PROMPT if args.lang == "uk" else None
+
+    clips = []
+    for p in paths:
+        a = preprocess(load_audio(p), boost=not args.no_boost)
+        clips.append((os.path.basename(p), a, _reference_for(p)))
+    total_dur = sum(len(a) for _, a, _ in clips) / SR
+
+    rows = {name: {"dur": len(a) / SR, "ref": ref} for name, a, ref in clips}
+
+    print(f"\n[whisper] {repo} на {device} ({ct}, beam {beam}) — будую…")
+    t0 = time.perf_counter()
+    wm = build_model(repo, device, ct)
+    print(f"    завантаження: {time.perf_counter() - t0:.2f} с")
+    for name, a, _ in clips:
+        times, text = [], ""
+        for _ in range(args.runs):
+            text, dt = transcribe_once(wm, a, beam, False, args.lang, hotwords, prompt)
+            times.append(dt)
+        rows[name]["w"] = (min(times), text)
+    del wm
+    gc.collect()
+
+    # flow's own loader, so device/quantization follow config exactly the way the
+    # app picks them (int8 on a CPU onnxruntime, fp32 on onnxruntime-gpu)
+    providers, dev = flow._parakeet_providers()
+    quant = flow._parakeet_quant(dev)
+    print(f"\n[parakeet] {flow.PARAKEET['label']} на {dev} ({quant}) — будую…")
+    if not flow.parakeet_available():
+        print("  пакет onnx-asr не встановлено: pip install onnx-asr")
+        return 1
+    if not flow.parakeet_installed(quant):
+        print(f"  модель не завантажена — качаю {flow.PARAKEET['size'][quant]}…")
+        from huggingface_hub import snapshot_download
+        snapshot_download(flow.PARAKEET["repo"], allow_patterns=flow._parakeet_files(quant))
+    t0 = time.perf_counter()
+    flow.load_parakeet()
+    print(f"    завантаження + прогрів: {time.perf_counter() - t0:.2f} с")
+    for name, a, _ in clips:
+        times, text = [], ""
+        for _ in range(args.runs):
+            t1 = time.perf_counter()
+            text = flow.parakeet_transcribe(a)
+            times.append(time.perf_counter() - t1)
+        rows[name]["p"] = (min(times), text)
+
+    print("\n" + "=" * 78)
+    print(f"WHISPER vs PARAKEET (мін. із {args.runs} запусків на кліп)")
+    print("=" * 78)
+    tw = tp = 0.0
+    ew, ep, n_ref = [], [], 0
+    for name, r in rows.items():
+        (dw, txw), (dp, txp) = r["w"], r["p"]
+        tw += dw
+        tp += dp
+        line = f"{name}  {r['dur']:.1f} с | whisper {dw:.3f} с | parakeet {dp:.3f} с"
+        if r["ref"]:
+            a_w, a_p = wer(r["ref"], txw), wer(r["ref"], txp)
+            ew.append(a_w)
+            ep.append(a_p)
+            n_ref += 1
+            line += f" | WER w {a_w:.0%} / p {a_p:.0%}"
+        print(line)
+        if r["ref"]:
+            print(f"  еталон:   {r['ref']}")
+        print(f"  whisper:  {txw}")
+        print(f"  parakeet: {txp}")
+    print("-" * 78)
+    print(f"Разом {total_dur:.1f} с аудіо: whisper {tw:.2f} с (RTF {total_dur / tw:.0f}x), "
+          f"parakeet {tp:.2f} с (RTF {total_dur / tp:.0f}x)")
+    if n_ref:
+        # word-weighted, not a mean of per-clip rates: a 1-word "Дякую." miss must
+        # not count as much as a miss in a 15-word sentence
+        words = [len(_wer_norm(r["ref"])) for r in rows.values() if r["ref"]]
+        agg = lambda errs: sum(e * w for e, w in zip(errs, words)) / sum(words)
+        print(f"WER на {n_ref} кліпах з еталоном ({sum(words)} слів): "
+              f"whisper {agg(ew):.1%}, parakeet {agg(ep):.1%}")
+    return 0
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         prog="bench.py",
@@ -389,6 +534,9 @@ def main() -> int:
                     help="не передавати словник із config.json як hotwords")
     ap.add_argument("--no-boost", action="store_true",
                     help="не піднімати гучність тихого кліпу так, як це робить застосунок")
+    ap.add_argument("--engines", action="store_true",
+                    help="порівняти Whisper і Parakeet на тих самих кліпах (час + текст; "
+                         "WER, якщо поруч із clip.wav лежить clip.txt з еталоном)")
     args = ap.parse_args()
 
     paths = collect_inputs(args.audio)
@@ -399,6 +547,8 @@ def main() -> int:
     if not paths:
         print("Немає аудіо. Передайте WAV-файл або теку, або скористайтеся --record N.")
         return 1
+    if args.engines:
+        return compare_engines(paths, args)
 
     # ---- device and compute types ----
     device = args.device

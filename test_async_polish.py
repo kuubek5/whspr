@@ -26,6 +26,11 @@ class AsyncPolishGuards(unittest.TestCase):
         # which then pollutes the production log the app is analysed from — 30 of
         # 55 async-polish lines in one session were this test noise.
         flow.log = lambda *a, **k: None
+        self._orig_mods, self._orig_wait = flow._modifiers_held, flow.ASYNC_LOCK_WAIT_S
+        self.mods = False
+        flow._modifiers_held = lambda: self.mods
+        # a held lock must fail fast here, or the worker would outlive the test
+        flow.ASYNC_LOCK_WAIT_S = 0.1
         flow.state["recording"] = False
         flow.config["llm"] = "groq"
         flow.config["groq_api_key"] = "x"
@@ -34,6 +39,7 @@ class AsyncPolishGuards(unittest.TestCase):
         (flow.llm_polish, flow._send_backspaces, flow.paste_text,
          flow.history_update_text, flow.user32, flow.log, st) = self._orig
         flow.state.clear(); flow.state.update(st)
+        flow._modifiers_held, flow.ASYNC_LOCK_WAIT_S = self._orig_mods, self._orig_wait
 
     def run_polish(self, raw, polished, hwnd=None, at=None):
         flow.llm_polish = lambda t, l: polished
@@ -76,8 +82,15 @@ class AsyncPolishGuards(unittest.TestCase):
                         at=time.time() - flow.ASYNC_REWRITE_WINDOW_S - 1)
         self.assertEqual(self.bs, [])
 
-    def test_recording_in_progress_skips(self):
+    def test_recording_next_take_still_rewrites(self):
+        # the next take types nothing until it ends, so the previous take's
+        # polish must still land (it used to be skipped: 25 of 211 real takes)
         flow.state["recording"] = True
+        self.run_polish("текст", "Текст.")
+        self.assertEqual(self.pasted, [("Текст.", self.HWND)])
+
+    def test_modifier_held_skips(self):
+        self.mods = True
         self.run_polish("текст", "Текст.")
         self.assertEqual(self.bs, [])
 

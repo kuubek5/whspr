@@ -340,5 +340,37 @@ class PolishSafety(unittest.TestCase):
         self.assertFalse(tf.polish_is_safe("щось", ""))
 
 
+class SelfCorrection(unittest.TestCase):
+    def test_marker_needs_words_on_both_sides(self):
+        has = tf.has_correction_marker
+        self.assertTrue(has("у п'ятницю ні в суботу"))
+        self.assertTrue(has("meet at five no wait at six"))
+        self.assertFalse(has("Ні, я не хочу."))
+        self.assertFalse(has("скажи йому ні"))
+        self.assertFalse(has("купи хліб і молоко"))
+
+    def test_real_correction_passes(self):
+        ok = tf.self_correction_ok
+        self.assertTrue(ok("дзвінок о третій вірніше о четвертій",
+                           "Дзвінок о четвертій."))
+        self.assertTrue(ok("забронюй столик на сьомий вечора ні на восьму",
+                           "Забронюй столик на восьму."))
+        # nothing deleted at all (the model decided it was no correction)
+        self.assertTrue(ok("ні я не хочу йти", "Ні, я не хочу йти."))
+
+    def test_marker_only_drop_rejected(self):
+        ok = tf.self_correction_ok
+        self.assertFalse(ok("це для Марини ой для Ірини", "Це для Марини, для Ірини."))
+        self.assertFalse(ok("поклади на стіл в сенсі на полицю",
+                            "Поклади на стіл, на полицю."))
+
+    def test_mass_deletion_rejected(self):
+        self.assertFalse(tf.self_correction_ok(
+            "це правда тобто я так думаю", "Думаю."))
+
+    def test_short_marker_take_not_skipped(self):
+        self.assertIsNone(tf.polish_skip_reason("П'ятниця, ні, субота.", 3))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -20,16 +20,26 @@
 | `spoken_punctuation` | bool | `true` | «кома»/«крапка»/«знак питання» → `,` `.` `?` |
 | `normalize_numbers` | bool | `true` | числівники словами → цифри: «триста п'ятдесят два» → `352` |
 | `voice_commands` | bool | `true` | голосові команди редагують попередню диктовку («великими літерами», «видали останнє», «переклади англійською») |
+| `command_mode_enabled` | bool | `true` | голосове редагування виділеного тексту: виділіть, натисніть `command_hotkey`, скажіть інструкцію — виділене замінюється відповіддю AI (потрібен `llm` ≠ `off`) |
+| `command_hotkey` | string | `"ctrl+alt+space"` | клавіша голосового редагування; `""` — вимкнено. Не може збігатися з `hotkey` |
+| `scribe_enabled` | bool | `true` | Scribe: та сама клавіша, коли нічого не виділено, — опишіть повідомлення («напиши Олегу, що зустріч переноситься на завтра»), і вставиться готовий текст. `false` — як раніше, «нічого не виділено». У терміналах не працює |
+| `scribe_reasoning_effort` | string | `"low"` | `reasoning_effort` для Scribe (лише моделі `openai/gpt-oss-*` на Groq) |
+| `scribe_style_prompts` | object | `{}` | власний тон Scribe для категорій програм (`chat`, `email`, `code`); `""` вимикає додаток для категорії |
 | `hands_free` | bool | `false` | тап клавіші вмикає запис, авто-стоп по тиші (замість утримання) |
-| `silence_stop_s` | float | `1.5` | скільки тиші завершує запис у hands-free |
+| `silence_stop_s` | float | `2.2` | скільки тиші завершує запис у hands-free |
 | `max_utterance_s` | int | `60` | стеля тривалости hands-free запису |
+| `autostop_engine` | str | `"vad"` | хто вирішує, що ви замовкли: `vad` — нейромережа Silero (розпізнає саме мовлення, не гучність), `rms` — старий поріг гучності. Якщо VAD не завантажився, автоматично `rms` |
+| `vad_speech_threshold` | float | `0.5` | ймовірність мовлення (0–1), з якої кадр вважається мовленням; тиша — нижче за поріг мінус 0.15 |
 | `auto_lang` | bool | `false` | Whisper сам визначає мову (використовує stock-модель, не uk-ft) |
 | `overlay` | bool | `true` | показувати пігулку-індикатор на екрані |
 | `dictionary` | str | `""` | терміни через кому → Whisper `hotwords` |
 | `replacements` | obj | (кілька) | голосові команди `фраза → текст` |
 | `llm` | str | `"off"` | постобробка: `off` / `groq` / `ollama` |
 | `groq_api_key` | str | `""` | ключ Groq (якщо `llm: groq`) |
-| `groq_model` | str | `llama-3.3-70b-versatile` | модель Groq |
+| `groq_model` | str | `openai/gpt-oss-20b` | модель Groq |
+| `groq_reasoning_effort` | str | `"low"` | скільки «думає» gpt-oss перед виправленням: `low` / `medium` / `high`; `""` — як за замовчуванням у Groq. Іншим моделям не надсилається |
+| `polish_skip_short` | bool | `true` | не звати AI для коротких фраз, які Whisper уже розставив (AI їх не змінює) |
+| `polish_skip_max_words` | int | `3` | до скількох слів фраза вважається короткою; `0` — завжди звати AI |
 | `ollama_model` | str | `qwen2.5:7b` | модель Ollama |
 | `autostart` | bool | `false` | копіювати ярлик у Startup |
 

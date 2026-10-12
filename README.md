@@ -77,6 +77,31 @@ python -m venv .venv
 
 Детально про кожну — [Wiki › Usage](docs/Usage.md) і [Wiki › Configuration](docs/Configuration.md).
 
+## Історія диктовок для Claude Code
+
+`mcp_history.py` — локальний MCP-сервер (MCP = протокол, через який Claude Code
+підключає зовнішні інструменти). Дає Claude Code прочитати твою історію диктовок,
+щоб можна було спитати: «що я надиктовував за останню годину?» або «знайди, що я
+казав про сервер». Лише стандартна бібліотека Python 3.10+, в інсталятор не входить.
+
+Підключити один раз (для всіх проєктів):
+
+```powershell
+claude mcp add kuubwave-history --scope user -- py -3 "C:\project whspr\mcp_history.py"
+```
+
+Перевірка: `claude mcp list` → `kuubwave-history ... Connected`. Прибрати:
+`claude mcp remove kuubwave-history --scope user`. Інша база: додай в кінці
+`--db "D:\шлях\history.db"`.
+
+Інструменти: `recent_dictations` (останні N, опційно за останні X хвилин),
+`search_dictations` (пошук підрядка без урахування регістру, кирилиця теж),
+`dictation_stats` (скільки всього / сьогодні, діапазон дат).
+
+Приватність: база `%LOCALAPPDATA%\KuubWave\history.db` відкривається **лише на
+читання**, сервер працює через stdin/stdout без мережі. Але те, що Claude Code
+прочитає, піде в розмову з моделлю — не проси його шукати диктовки з чутливими даними.
+
 ## Файли
 
 | Файл | Що робить |
@@ -91,6 +116,7 @@ python -m venv .venv
 | `test_pipeline.py` | smoke-тест: модель на CUDA транскрибує |
 | `test_e2e.py` | e2e: Windows SAPI TTS → Whisper → звірка слів |
 | `test_uk_ab.py` | A/B двох укр-моделей на edge-TTS |
+| `mcp_history.py` | MCP-сервер історії диктовок для Claude Code (read-only, stdio) |
 | `requirements.txt` | залежності |
 
 ## Технічні рішення (і чому)
