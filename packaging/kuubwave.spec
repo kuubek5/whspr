@@ -32,7 +32,9 @@ hiddenimports = ["comtypes", "pystray._win32", "cuda_setup", "webview_app",
                  # flow.py split (step 2): same reason as step 1.
                  "model_library", "license_gate", "parakeet_engine", "audio_duck",
                  # flow.py split (step 3): same reason as step 1.
-                 "llm_polish", "text_passes", "voice_commands", "command_mode", "scribe"]
+                 "llm_polish", "text_passes", "voice_commands", "command_mode", "scribe",
+                 # flow.py split (step 4): same reason as step 1.
+                 "single_instance", "whisper_model", "audio_input", "paste"]
 
 # pull in data files / dylibs / submodules for the tricky native packages.
 # onnx_asr + onnxruntime are for the optional Parakeet engine: flow.py imports
