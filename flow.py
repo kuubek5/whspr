@@ -1071,9 +1071,7 @@ def transcribe_and_paste(pre: list, cur: list, target_hwnd: int,
 
 from live_preview import (  # noqa: F401  (moved; re-exported so flow.X keeps working)
     LIVE_TICK_S, LIVE_MIN_NEW_S, LIVE_WINDOW_S, live_preview_enabled, _live_decode,
-    live_preview_loop, _build_hotwords, _segment_stats, _hallucination_reason,
-    ASYNC_REWRITE_MAX_CHARS, ASYNC_REWRITE_WINDOW_S, ASYNC_LOCK_WAIT_S,
-    _schedule_llm_polish
+    live_preview_loop,
 )
 
 # Remembers the dictionary string we last warned about, so the "very short
@@ -1083,8 +1081,11 @@ _hotwords_warned_for: str | None = None
 
 
 from transcription import (  # noqa: F401  (moved; re-exported so flow.X keeps working)
+    _build_hotwords, _segment_stats, _hallucination_reason,
+    ASYNC_REWRITE_MAX_CHARS, ASYNC_REWRITE_WINDOW_S, ASYNC_LOCK_WAIT_S,
+    _schedule_llm_polish,
     SPEC_AFTER_S, _spec_lock, _spec_result, speculative_enabled, _speculate,
-    _speculative_result, CloudSTTError, _recognize, _transcribe_impl
+    _speculative_result, CloudSTTError, _recognize, _transcribe_impl,
 )
 
 _spec_taken = None        # key the final decode already settled, hit or miss
